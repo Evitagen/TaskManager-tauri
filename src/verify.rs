@@ -157,8 +157,9 @@ pub fn run_layout(app: &tauri::AppHandle) {
 }
 
 pub fn run(app: &tauri::AppHandle) {
-    // warm-up: let the webview load and the graphs collect data
-    std::thread::sleep(Duration::from_millis(10_000));
+    // warm-up: let the webview load and the graphs collect a FULL 90 s history
+    // window (HIST_WINDOW_MS in app.js) so screenshots show complete graphs
+    std::thread::sleep(Duration::from_millis(100_000));
     let Some(win) = app.get_webview_window("main") else {
         eprintln!("[verify] no main window");
         app.exit(1);
@@ -190,6 +191,18 @@ pub fn run(app: &tauri::AppHandle) {
         );
         let _ = win.eval(&js);
         std::thread::sleep(Duration::from_millis(1500));
+
+        if tab == "cpu" {
+            // screenshot the per-core grid (right-click -> "Show logical cores")
+            let _ = win.eval(
+                "(()=>{ const box=document.getElementById('cpu-graph-box'); if(!box) return 'no-box'; const r=box.getBoundingClientRect(); box.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:r.x+100,clientY:r.y+60})); return 'ctx'; })()",
+            );
+            std::thread::sleep(Duration::from_millis(400));
+            let _ = win.eval(
+                "(()=>{ const m=document.getElementById('cpu-ctx-menu'); if(!m || !m.classList.contains('open')) return 'menu-closed'; const item=m.querySelector('.ctx-item'); if(item){ item.click(); return 'cores-opened'; } return 'no-item'; })()",
+            );
+            std::thread::sleep(Duration::from_millis(1200));
+        }
 
         let dump = format!(
             r#"(() => {{

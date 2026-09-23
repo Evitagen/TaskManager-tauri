@@ -13,7 +13,7 @@ The Electron app is left untouched; everything here lives in this folder.
 The window never scrolls: whatever is taller than the content area is scaled
 vertically to fit (see [fitPage fallback](#known-differences--notes)). Every
 screenshot below is a capture of the real running app — 1240×800 window,
-500 ms refresh.
+500 ms refresh, graphs warmed up to their full 90 s history window.
 
 ### Overview
 
@@ -30,12 +30,13 @@ memory, temperature, power and fan.
 
 ![CPU](screenshots/cpu.png)
 
-The dedicated CPU view: a full-width usage history (one tick per 500 ms) plus
-the same stat tiles as the Overview card. **Right-click the graph** for the
-context menu: “Show logical cores” swaps the graph for a grid with one live
-cell per logical core (28 on the i9-10940X this was built on); choosing the
-graph again restores it. The per-core cells and the total are both computed
-from the same per-line `/proc/stat` deltas.
+The dedicated CPU view. By default it shows a full-width usage history (one
+tick per 500 ms, 90 s window) plus the same stat tiles as the Overview card;
+**right-clicking the graph** opens the context menu, and “Show logical cores”
+swaps the graph for the grid shown here — one live cell per logical core (28
+on the i9-10940X this was built on), each with its own usage history.
+Choosing the graph again restores it. The per-core cells and the total are
+both computed from the same per-line `/proc/stat` deltas.
 
 ### Memory
 
@@ -157,11 +158,13 @@ libX11 dev headers (to build `shots/xg`, the X-geometry probe).
 Two env-gated modes are wired into `lib.rs` (neither affects normal use):
 
 - `TM_VERIFY=1 ./target/debug/task-manager`
-  Warms up, then drives the **real UI**: clicks through all seven tabs
-  (Overview, CPU, Memory, GPU, Disk, Net, Tasks), dumps each visible section's
-  text and the page transform to stderr, screenshots each tab, then exercises
-  the end-task flow against a spawned `sleep` child (row → End task → confirm)
-  and checks the kill result. Prints `KILLTEST PASS/FAIL` and exits.
+  Warms up for 100 s (so the graphs collect a full 90 s history window for
+  the screenshots), then drives the **real UI**: clicks through all seven
+  tabs (Overview, CPU — switching it to the per-core grid —, Memory, GPU,
+  Disk, Net, Tasks), dumps each visible section's text and the page transform
+  to stderr, screenshots each tab, then exercises the end-task flow against a
+  spawned `sleep` child (row → End task → confirm) and checks the kill
+  result. Prints `KILLTEST PASS/FAIL` and exits.
 
 - `TM_VERIFY_LAYOUT=1 ./target/debug/task-manager`
   Dumps layout geometry (rects/display of the page, sections, graphs, canvas),
