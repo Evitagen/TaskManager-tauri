@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+<title>Task Manager</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ────────────────── title bar ────────────────── -->
+  <header class="titlebar">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+        <defs><linearGradient id="bg1" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#6ad8ff"/><stop offset="1" stop-color="#4c8dff"/>
+        </linearGradient></defs>
+        <path fill="url(#bg1)" d="M12 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7 7 7 0 0 1 4.9 2L15 12l7 1-1-7-2.4 2.4A9 9 0 0 0 12 3Z"/>
+        <circle fill="url(#bg1)" cx="12" cy="12" r="2.1"/>
+      </svg>
+      <span class="brand-name">Task Manager</span>
+    </div>
+    <div class="win-buttons">
+      <button class="wb" id="btn-min" title="Minimize"><svg viewBox="0 0 12 12" width="11" height="11"><path d="M1 6h10" stroke="currentColor" stroke-width="1.1"/></svg></button>
+      <button class="wb" id="btn-max" title="Maximize"><svg viewBox="0 0 12 12" width="11" height="11"><rect x="1.8" y="1.8" width="8.4" height="8.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button>
+      <button class="wb wb-close" id="btn-close" title="Close"><svg viewBox="0 0 12 12" width="11" height="11"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.1"/></svg></button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <!-- ────────────────── side nav (tabs: one resource per view) ────────────────── -->
+    <nav class="nav" id="nav">
+      <button class="nav-item active" data-sec="overview">
+        <svg viewBox="0 0 24 24"><path d="M4 4h7v7H4V4Zm9 0h7v4h-7V4Zm0 7h7v9h-7v-9ZM4 13h7v7H4v-7Z" fill="currentColor"/></svg>
+        <span>Overview</span>
+      </button>
+      <button class="nav-item" data-sec="cpu">
+        <svg viewBox="0 0 24 24"><path d="M9 2h2v2h2V2h2v2h1a1 1 0 0 1 1 1v2h2v2h2v2h-2v2h-2v2h2v2h-2v2a1 1 0 0 1-1 1h-1v2h-2v-2h-2v2H9v-2H8a1 1 0 0 1-1-1v-2H5v-2H3v-2h2v-2H3V9h2V7a1 1 0 0 1 1-1h1V4h2V2Zm0 5v10h6V7H9Zm2 2h2v6h-2V9Z" fill="currentColor"/></svg>
+        <span>CPU</span>
+      </button>
+      <button class="nav-item" data-sec="mem">
+        <svg viewBox="0 0 24 24"><path d="M3 8h18v6h-2v2h-2v-2h-2v2h-2v-2H9v2H7v-2H5v2H3V8Zm2 2v2h2v-2H5Zm4 0v2h2v-2H9Zm4 0v2h2v-2h-2Zm4 0v2h2v-2h-2Z" fill="currentColor"/></svg>
+        <span>Memory</span>
+      </button>
+      <button class="nav-item" data-sec="gpu">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3l-2 3h-6l-2-3H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm2 3v4h5V8H6Zm7 0v4h5V8h-5Zm-5 6v2h5v-2h-5Z" fill="currentColor"/></svg>
+        <span>GPU</span>
+      </button>
+      <button class="nav-item" data-sec="disk">
+        <svg viewBox="0 0 24 24"><path d="M12 3c5 0 9 1.3 9 3s-4 3-9 3-9-1.3-9-3 4-3 9-3Zm-9 5.5C4 9.6 8 11 12 11s8-1.4 9-2.5v3c0 1.7-4 3-9 3s-9-1.3-9-3v-3Zm0 5.5c0 1.7 4 3 9 3s9-1.3 9-3V21c0 1.7-4 3-9 3s-9-1.3-9-3v-8Z" fill="currentColor"/></svg>
+        <span>Disks</span>
+      </button>
+      <button class="nav-item" data-sec="net">
+        <svg viewBox="0 0 24 24"><path d="M12 9a7 7 0 0 1 7 7h-2a5 5 0 0 0-5-5V9Zm0 4a3 3 0 0 1 3 3h-2a1 1 0 0 0-1-1v-2Zm-9 3a9 9 0 0 1 9-9v2a7 7 0 0 0-7 7H3Zm17.9-1.6-1.4 1.4A8.9 8.9 0 0 0 12 5v2a6.9 6.9 0 0 1 6.9 6.9l2 1.5Z" fill="currentColor"/></svg>
+        <span>Network</span>
+      </button>
+      <button class="nav-item" data-sec="tasks">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v2.2H4zM4 10.9h16v2.2H4zM4 16.8h16v2.2H4z" fill="currentColor"/></svg>
+        <span>Running tasks</span>
+      </button>
+      <div class="nav-spacer"></div>
+      <div class="nav-host" id="nav-host" title="Host"></div>
+    </nav>
+
+    <!-- ────────────────── dashboard ────────────────── -->
+    <main class="content" id="content">
+      <div class="page" id="page">
+
+        <!-- Overview row: CPU + Memory side-by-side (full width) -->
+        <div class="ov-row" id="ov-row">
+          <!-- CPU -->
+          <section class="section" id="sec-cpu">
+            <div class="sec-head">
+              <div class="sec-title">CPU <span class="sec-sub" id="cpu-sub"></span></div>
+              <div class="sec-big" id="cpu-big" style="color:#4cc2ff">—</div>
+            </div>
+            <div class="graph-box" id="cpu-graph-box">
+              <canvas id="cpu-canvas"></canvas>
+              <div class="graph-hint">CPU Usage (%)</div>
+              <div id="cores-host"></div>
+            </div>
+            <div class="stats-row" id="cpu-stats"></div>
+          </section>
+
+          <!-- MEMORY -->
+          <section class="section" id="sec-mem">
+            <div class="sec-head">
+              <div class="sec-title">Memory <span class="sec-sub" id="mem-sub"></span></div>
+              <div class="sec-big" id="mem-big" style="color:#b08cff">—</div>
+            </div>
+            <div class="graph-box"><canvas id="mem-canvas"></canvas><div class="graph-hint">Memory in use (%)</div></div>
+            <div class="stats-row" id="mem-stats"></div>
+          </section>
+        </div>
+
+        <!-- GPU (all adapters in one section) -->
+        <section class="section" id="sec-gpu">
+          <div class="sec-head">
+            <div class="sec-title">GPU <span class="sec-sub" id="gpu-sub"></span></div>
+          </div>
+          <div class="subgrid" id="gpu-blocks"></div>
+        </section>
+
+        <!-- DISKS (all disks in one section) -->
+        <section class="section" id="sec-disk">
+          <div class="sec-head">
+            <div class="sec-title">Disks <span class="sec-sub" id="disk-sub"></span></div>
+          </div>
+          <div class="subgrid" id="disk-blocks"></div>
+        </section>
+
+        <!-- NETWORK (all adapters in one section) -->
+        <section class="section" id="sec-net">
+          <div class="sec-head">
+            <div class="sec-title">Network <span class="sec-sub" id="net-sub"></span></div>
+          </div>
+          <div class="subgrid" id="net-blocks"></div>
+        </section>
+
+        <!-- RUNNING TASKS -->
+        <section class="section" id="sec-tasks">
+          <div class="sec-head">
+            <div class="sec-title">Running tasks <span class="count-chip" id="tasks-count"></span></div>
+            <input id="task-search" class="search" type="search" placeholder="Find a process" spellcheck="false" />
+          </div>
+          <div class="table-wrap" id="tasks-table"></div>
+          <div class="page-footer">
+            <span class="muted" id="tasks-foot"></span>
+            <button class="btn danger" id="btn-end-task" disabled>End task</button>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ────────────────── confirm modal ────────────────── -->
+  <div class="modal-scrim" id="modal" hidden>
+    <div class="modal">
+      <h2>End task</h2>
+      <p id="modal-text"></p>
+      <p class="modal-sub muted">Ending a task may cause open applications to lose unsaved data.</p>
+      <div class="modal-actions">
+        <button class="btn ghost" id="modal-cancel">Cancel</button>
+        <button class="btn" id="modal-force">Force (SIGKILL)</button>
+        <button class="btn danger" id="modal-ok">End task</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- right-click context menu on the CPU graph -->
+  <div id="cpu-ctx-menu" class="ctx-menu"></div>
+
+  <script src="bridge.js"></script>
+  <script src="graph.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

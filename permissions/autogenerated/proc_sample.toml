@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-proc-sample"
+description = "Enables the proc_sample command without any pre-configured scope."
+commands.allow = ["proc_sample"]
+
+[[permission]]
+identifier = "deny-proc-sample"
+description = "Denies the proc_sample command without any pre-configured scope."
+commands.deny = ["proc_sample"]

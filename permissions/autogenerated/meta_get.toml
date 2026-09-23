@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-meta-get"
+description = "Enables the meta_get command without any pre-configured scope."
+commands.allow = ["meta_get"]
+
+[[permission]]
+identifier = "deny-meta-get"
+description = "Denies the meta_get command without any pre-configured scope."
+commands.deny = ["meta_get"]

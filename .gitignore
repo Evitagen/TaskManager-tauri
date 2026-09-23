@@ -1,0 +1,5 @@
+.toolchain/
+target/
+gen/
+shots/*
+!shots/*.c
