@@ -184,7 +184,7 @@ pub fn run(app: &tauri::AppHandle) {
     let mut child = std::process::Command::new("sleep").arg("300").spawn().ok();
     let test_pid = child.as_ref().map(|c| c.id()).unwrap_or(0);
 
-    for tab in ["overview", "cpu", "gpu", "disk", "net", "tasks"] {
+    for tab in ["overview", "cpu", "mem", "gpu", "disk", "net", "tasks"] {
         let js = format!(
             "(()=>{{ const b=[...document.querySelectorAll('.nav-item')].find(x=>x.dataset.sec==='{tab}'); if(b) b.click(); }})()"
         );

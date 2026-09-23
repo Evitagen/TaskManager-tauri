@@ -8,15 +8,88 @@ maps the same `window.api` surface onto Tauri's `__TAURI_INTERNALS__.invoke`.
 
 The Electron app is left untouched; everything here lives in this folder.
 
-## Screenshots
+## Sections
 
-| Overview | CPU | GPU |
-|----------|-----|-----|
-| ![Overview](screenshots/overview.png) | ![CPU](screenshots/cpu.png) | ![GPU](screenshots/gpu.png) |
+The window never scrolls: whatever is taller than the content area is scaled
+vertically to fit (see [fitPage fallback](#known-differences--notes)). Every
+screenshot below is a capture of the real running app — 1240×800 window,
+500 ms refresh.
 
-| Disks | Network | Running tasks |
-|-------|---------|---------------|
-| ![Disks](screenshots/disk.png) | ![Network](screenshots/net.png) | ![Running tasks](screenshots/tasks.png) |
+### Overview
+
+![Overview](screenshots/overview.png)
+
+The landing tab: CPU and Memory side by side on top, one card per GPU below.
+Each card pairs a live sparkline (the big number is the headline value) with
+the stats that matter most — for CPU: utilization, speed, up time, logical /
+physical processors, base / max speed, load average; for Memory: in use,
+available, total, cached, swap used/total and committed; per GPU: dedicated
+memory, temperature, power and fan.
+
+### CPU
+
+![CPU](screenshots/cpu.png)
+
+The dedicated CPU view: a full-width usage history (one tick per 500 ms) plus
+the same stat tiles as the Overview card. **Right-click the graph** for the
+context menu: “Show logical cores” swaps the graph for a grid with one live
+cell per logical core (28 on the i9-10940X this was built on); choosing the
+graph again restores it. The per-core cells and the total are both computed
+from the same per-line `/proc/stat` deltas.
+
+### Memory
+
+![Memory](screenshots/mem.png)
+
+Memory-in-use history plus the full tile set: in use, available, total,
+cached, swap used/total and committed. Values come straight from
+`/proc/meminfo` (kB → bytes) with the same cached/buffers accounting as the
+original app.
+
+### GPU
+
+![GPU](screenshots/gpu.png)
+
+One card per adapter (two RTX 3090 on this host): per-GPU utilization
+sparkline, dedicated memory used/total, temperature, power (current / TDP)
+and fan. Telemetry comes from NVML via `nvidia-smi --query-gpu` — the test
+suite cross-checks VRAM totals against the driver exactly. If NVML is
+unavailable the collector falls back to DRM sysfs + `/proc/driver/nvidia` +
+`lspci` and sets `telemetry:false`, so the cards still enumerate even without
+live numbers.
+
+### Disks
+
+![Disks](screenshots/disk.png)
+
+One card per **whole disk** — partitions (`nvme0n1p1`, …) are filtered out —
+with an active-time % sparkline (the `io_ticks` delta from
+`/proc/diskstats`), read/write speed, capacity, disk space of the largest
+mounted partition (10 s cache; `—` when the disk has no mounted partition),
+type (SSD/HDD from `queue/rotational`) and model. Card order follows the
+`/proc/diskstats` line order, so the grid is stable between ticks — a
+regression test pins exactly that.
+
+### Network
+
+![Network](screenshots/net.png)
+
+One card per physical interface — `lo`, `veth*`, `docker*`, `br-*` and
+`virbr*` are excluded. Each card plots RX and TX as two series and shows
+receive/send B/s, link speed (`—` when the driver doesn’t report it), IPv4
+address, MAC and operstate.
+
+### Running tasks
+
+![Running tasks](screenshots/tasks.png)
+
+The live process table: every process on the box, sorted by CPU by default
+and sortable by any column header click. Columns are Name, Status, CPU, Disk
+and Network I/O (B/s — own-uid processes only, because the kernel hides
+other users’ `/proc/<pid>/io`, same as the original) and Memory. Selecting a
+row enables **End task** → confirmation modal → `SIGTERM` (force →
+`SIGKILL`); pid ≤ 1 and the app itself are refused with `EPERM`. The footer
+carries the process count plus current CPU and memory totals.
 
 ## Layout
 
@@ -84,11 +157,11 @@ libX11 dev headers (to build `shots/xg`, the X-geometry probe).
 Two env-gated modes are wired into `lib.rs` (neither affects normal use):
 
 - `TM_VERIFY=1 ./target/debug/task-manager`
-  Warms up, then drives the **real UI**: clicks through all six tabs
-  (Overview, CPU, GPU, Disk, Net, Tasks), dumps each visible section's text and
-  the page transform to stderr, screenshots each tab, then exercises the
-  end-task flow against a spawned `sleep` child (row → End task → confirm) and
-  checks the kill result. Prints `KILLTEST PASS/FAIL` and exits.
+  Warms up, then drives the **real UI**: clicks through all seven tabs
+  (Overview, CPU, Memory, GPU, Disk, Net, Tasks), dumps each visible section's
+  text and the page transform to stderr, screenshots each tab, then exercises
+  the end-task flow against a spawned `sleep` child (row → End task → confirm)
+  and checks the kill result. Prints `KILLTEST PASS/FAIL` and exits.
 
 - `TM_VERIFY_LAYOUT=1 ./target/debug/task-manager`
   Dumps layout geometry (rects/display of the page, sections, graphs, canvas),
