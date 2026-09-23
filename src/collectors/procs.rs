@@ -1,4 +1,4 @@
-// Process list sampler — mirrors lib/processes.js:
+// Process list sampler:
 // /proc enumeration, per-process CPU (jiffy deltas vs total machine jiffies),
 // RSS from /proc/<pid>/status, cmdline cached per pid, disk I/O for own uid,
 // batched username resolution, dead-pid cache cleanup.

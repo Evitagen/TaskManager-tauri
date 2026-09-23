@@ -1,5 +1,5 @@
-// Tauri bridge: exposes the same window.api surface the Electron preload
-// did, on top of the injected __TAURI_INTERNALS__ core invoke.
+// Tauri bridge: exposes the window.api surface the UI uses, on top of the
+// injected __TAURI_INTERNALS__ core invoke.
 // Loaded before app.js; no npm dependencies required.
 'use strict';
 (() => {

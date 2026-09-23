@@ -1,5 +1,4 @@
-// Disk sampler — mirrors lib/linux.js DiskSampler
-// (/proc/diskstats deltas + /sys/block meta + mount usage via statfs).
+// Disk sampler (/proc/diskstats deltas + /sys/block meta + mount usage via statfs).
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};

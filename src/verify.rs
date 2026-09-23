@@ -3,16 +3,16 @@
 // root-window capture cropped to this app's X window (Tauri v2 exposes no
 // window capture on Linux, and direct XGetImage on a GL webkit window can be
 // stale under a compositor). Verify mode retitles the window to
-// "Task Manager [Tauri Verify]" so it is unambiguous even while the Electron
-// reference app (same title) is running.
+// "Task Manager [Tauri Verify]" so the capture tools can find it
+// unambiguously even when other windows share the plain title.
 
 use std::io::Write;
 use std::time::Duration;
 
 use tauri::Manager;
 
-/// Verify-mode window title: keeps this app's X window unambiguous next to
-/// the Electron reference app, which uses the same plain title.
+/// Verify-mode window title: keeps this app's X window unambiguous when
+/// other windows share the plain "Task Manager" title.
 pub const VERIFY_TITLE: &str = "Task Manager [Tauri Verify]";
 
 /// Find the X window id of this app via xprop (no xdotool on this host).

@@ -1,4 +1,4 @@
-// CPU sampler — mirrors lib/linux.js CpuSampler (/proc/stat deltas).
+// CPU sampler (/proc/stat deltas, per-core, frequency, load, uptime).
 
 use serde::Serialize;
 use crate::collectors::util::{clamp, read_num, read_text, round};

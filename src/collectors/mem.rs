@@ -1,4 +1,4 @@
-// Memory sampler — mirrors lib/linux.js MemSampler (/proc/meminfo).
+// Memory sampler (/proc/meminfo).
 
 use serde::Serialize;
 use crate::collectors::util::read_text;

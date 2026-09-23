@@ -1,17 +1,22 @@
-# Task Manager — Tauri v2 port
+# Task Manager
 
-A self-contained [Tauri](https://tauri.app) v2 port of the Electron task manager
-in the parent directory (`../`). The Rust side re-implements the collector logic
-from the Electron app's `lib/` with **identical JSON contracts**, and the web UI
-is reused almost verbatim — the only frontend change is a small `bridge.js` that
-maps the same `window.api` surface onto Tauri's `__TAURI_INTERNALS__.invoke`.
+A lightweight, open-source task manager for Linux — live CPU, memory, GPU,
+disk and network monitoring plus a full process list, in a single
+undecorated window with no scrolling.
 
-The Electron app is left untouched; everything here lives in this folder.
+Built with [Tauri v2](https://tauri.app): Rust collectors sample the kernel
+directly (`/proc`, sysfs, NVML) every 500 ms, and a small web UI renders the
+data. It is one self-contained binary — the whole app runs in ~200 MB of
+memory in a debug build.
+
+The project is public on
+[GitHub](https://github.com/Evitagen/TaskManager-tauri) under the MIT
+license — issues, forks and contributions are welcome.
 
 ## Sections
 
 The window never scrolls: whatever is taller than the content area is scaled
-vertically to fit (see [fitPage fallback](#known-differences--notes)). Every
+vertically to fit (see [fitPage fallback](#platform-notes)). Every
 screenshot below is a capture of the real running app — 1240×800 window,
 500 ms refresh, graphs warmed up to their full 90 s history window.
 
@@ -44,8 +49,7 @@ both computed from the same per-line `/proc/stat` deltas.
 
 Memory-in-use history plus the full tile set: in use, available, total,
 cached, swap used/total and committed. Values come straight from
-`/proc/meminfo` (kB → bytes) with the same cached/buffers accounting as the
-original app.
+`/proc/meminfo` (kB → bytes) with standard cached/buffers accounting.
 
 ### GPU
 
@@ -87,7 +91,7 @@ address, MAC and operstate.
 The live process table: every process on the box, sorted by CPU by default
 and sortable by any column header click. Columns are Name, Status, CPU, Disk
 and Network I/O (B/s — own-uid processes only, because the kernel hides
-other users’ `/proc/<pid>/io`, same as the original) and Memory. Selecting a
+other users’ `/proc/<pid>/io`) and Memory. Selecting a
 row enables **End task** → confirmation modal → `SIGTERM` (force →
 `SIGKILL`); pid ≤ 1 and the app itself are refused with `EPERM`. The footer
 carries the process count plus current CPU and memory totals.
@@ -116,9 +120,9 @@ tauri/
 │       ├── procs.rs             # /proc/<pid> snapshot + kill (sigterm/sigkill)
 │       └── util.rs              # read helpers + timeout-bounded process runner
 ├── frontend/
-│   ├── index.html / style.css   # copied from the Electron renderer
-│   ├── app.js / graph.js        # copied (app.js: +rAF fallback in fitPage)
-│   └── bridge.js                # NEW: window.api -> Tauri invoke
+│   ├── index.html / style.css   # static web UI
+│   ├── app.js / graph.js        # app logic + canvas graph rendering
+│   └── bridge.js                # window.api -> Tauri invoke bridge
 ├── tests/collectors.rs          # integration tests for the collectors
 ├── screenshots/                 # README screenshots (one per tab)
 ├── shots/                       # verify-mode screenshots + xg/mouse X11 helpers
@@ -175,10 +179,10 @@ Screenshots are written to `shots/tauri_<tab>.png`. Because Tauri v2 exposes no
 window-capture API on Linux, the harness captures the **root window** with
 `import -window root` and crops to this app's X window geometry (queried by the
 `shots/xg` probe). This is the composited on-screen truth. Verify mode retitles
-the window to `Task Manager [Tauri Verify]` so it is unambiguous even while the
-Electron reference app (same plain title) is running.
+the window to `Task Manager [Tauri Verify]` so the capture tools can find it
+unambiguously even when other windows share the plain title.
 
-## JSON contract (identical to the Electron renderer)
+## JSON contract (frontend ↔ Rust)
 
 `perf_sample` → `{ ts, host, platform, cpu{…}, memory{…}, disks[], gpus[], nets[] }`
 `proc_sample` → `{ ts, procs[{pid,name,state,uid,user,cpu,mem,diskBs,netBs,cmdline,isApp,isSelf}], selfUid }`
@@ -186,10 +190,10 @@ Electron reference app (same plain title) is running.
 `proc_kill`   → `{ ok, error? }`
 
 Field names are camelCase (`serde rename_all`) and match every consumer in
-`frontend/app.js`. Rates (B/s, %, MHz, GHz) are computed with the same
-delta-over-time semantics as the original `lib/`.
+`frontend/app.js`. Rates (B/s, %, MHz, GHz) are computed as deltas over the
+500 ms sampling interval.
 
-## Known differences / notes
+## Platform notes
 
 - **`WEBKIT_DISABLE_COMPOSITING_MODE=1` is set in `run()`** (before the webview
   is created). On this host (picom with the xrender backend), WebKitGTK's
@@ -202,11 +206,10 @@ delta-over-time semantics as the original `lib/`.
 - **GPU source.** Primary path is `nvidia-smi` (NVML); if that is unavailable the
   collector falls back to DRM sysfs and `/proc/driver/nvidia` + `lspci`, and
   marks `telemetry:false`. On this host NVML is live (2× RTX 3090).
-- **`isApp` / `isSelf` window tagging** depends on `wmctrl`, which is not
-  installed here; those fields are therefore empty (same as the JS app without
-  wmctrl). `isSelf` is always populated.
+- **`isApp` / `isSelf` window tagging** depends on `wmctrl`; when `wmctrl` is
+  not installed, `isApp` is empty. `isSelf` is always populated.
 - **CPU "Speed" may be null** on CPUs whose `cpuinfo` lacks `cpu MHz` (e.g. this
-  Skylake-X); the UI then shows `—`, exactly like the original.
+  Skylake-X); the UI then shows `—`.
 - **Window drag & resize.** WebKitGTK ignores Chromium's `-webkit-app-region:
   drag` (and a `decorations:false` window has no OS-side resize borders either),
   so `bridge.js` drives the core `plugin:window|start_dragging` command on
@@ -227,3 +230,8 @@ delta-over-time semantics as the original `lib/`.
 Window controls use the `plugin:window|…` core commands (`minimize`,
 `maximize`, `unmaximize`, `is_maximized`, `close`, `start_dragging`,
 `start_resize_dragging`) with `{label:'main'}`.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Free to use, fork and build on, no strings
+attached.

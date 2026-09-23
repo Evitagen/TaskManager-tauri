@@ -44,7 +44,7 @@ impl Hub {
         }
     }
 
-    /// perf:sample — same shape as the Electron lib/perf.js Linux path.
+    /// Perf payload consumed by the frontend (the `perf_sample` command).
     pub fn performance(&mut self) -> Value {
         let info = self.cpu.info().clone();
         let cpu_sample = self.cpu.sample();
@@ -80,7 +80,7 @@ impl Hub {
         })
     }
 
-    /// proc:sample — same shape as the Electron lib/perf.js processes().
+    /// Process payload consumed by the frontend (the `proc_sample` command).
     pub fn processes(&mut self) -> Value {
         let (procs, self_uid) = self.procs.sample();
         json!({

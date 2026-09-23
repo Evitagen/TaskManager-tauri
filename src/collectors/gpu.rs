@@ -1,4 +1,4 @@
-// Multi-GPU collector — mirrors lib/gpu.js:
+// Multi-GPU collector:
 //   1. nvidia-smi (NVML) with 1 s backoff + last-good cache
 //   2. /sys/class/drm (amdgpu busy %, i915/xe gt busy, hwmon temp/power)
 //   3. /proc/driver/nvidia + lspci enumeration (no telemetry)

@@ -1,5 +1,4 @@
-// Network sampler — mirrors lib/linux.js NetSampler
-// (/sys/class/net statistics deltas, physical interfaces only).
+// Network sampler (/sys/class/net statistics deltas, physical interfaces only).
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
