@@ -304,3 +304,49 @@ td.name .pid-tag { color: var(--text-3); font-size: 11px; }
 .modal p { font-size: 13px; }
 .modal-sub { font-size: 12px; margin-top: 6px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+/* ── activity log tab ──────────────────────────────────────────────────── */
+.log-controls { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.log-status { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; min-width: 60px; text-align: right; }
+.log-recdot {
+  width: 9px; height: 9px; border-radius: 50%; background: var(--danger);
+  box-shadow: 0 0 0 0 rgba(224,108,108,.6); animation: logpulse 1.4s infinite;
+}
+@keyframes logpulse {
+  0% { box-shadow: 0 0 0 0 rgba(224,108,108,.55); }
+  70% { box-shadow: 0 0 0 7px rgba(224,108,108,0); }
+  100% { box-shadow: 0 0 0 0 rgba(224,108,108,0); }
+}
+
+.log-live { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 10px 20px; text-align: center; }
+.log-live[hidden], .log-review[hidden] { display: none; }
+.log-hero { max-width: 640px; }
+.log-hero-title { font-size: 22px; font-weight: 600; margin-bottom: 10px; }
+.log-hero-sub { font-size: 13.5px; line-height: 1.55; color: var(--text-2); }
+.log-live-hint { font-size: 12px; color: var(--text-3); }
+.log-live-hint b { color: var(--text-2); font-weight: 600; }
+
+.log-review { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.log-top { flex: 1 1 auto; display: flex; gap: 16px; min-height: 0; }
+.log-graphcol { flex: 1.55 1 0; min-width: 0; display: flex; flex-direction: column; }
+.log-graphbox { flex: 1 1 0; min-height: 150px; margin-bottom: 4px; }
+.log-flagcol { flex: 1 1 0; min-width: 240px; display: flex; flex-direction: column; border-left: 1px solid var(--border-soft); padding-left: 16px; }
+.log-subhead { font-size: 12px; font-weight: 600; color: var(--text-2); margin: 0 0 8px; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.log-table-head { margin-top: 12px; }
+
+.log-flags { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+.log-flag { background: var(--panel); border: 1px solid var(--border-soft); border-radius: 8px; padding: 9px 11px; }
+.log-flag-none { padding: 14px 4px; font-size: 12.5px; }
+.lf-head { display: flex; align-items: center; gap: 8px; }
+.lf-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lf-badge { font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; padding: 1px 7px; border-radius: 10px; flex: 0 0 auto; }
+.sev-high { background: rgba(224,108,108,.18); color: #ff9d9d; }
+.sev-med  { background: rgba(232,201,90,.16); color: #ecd07a; }
+.sev-low  { background: rgba(108,207,108,.15); color: #9fe09f; }
+.lf-meta { font-size: 11px; margin-top: 3px; }
+.lf-reasons { margin: 7px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; }
+.lf-reasons li { font-size: 12px; color: var(--text); }
+
+.log-appchip { display: inline-block; margin-left: 7px; font-size: 9.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--accent-text); background: var(--accent-dim); padding: 1px 6px; border-radius: 8px; vertical-align: 1px; }
+
+.log-table { flex: 1 1 150px; min-height: 130px; max-height: none; overflow-y: auto; border: 1px solid var(--border-soft); border-radius: 8px; }

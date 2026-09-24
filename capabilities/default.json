@@ -16,6 +16,9 @@
     "allow-proc-sample",
     "allow-proc-kill",
     "allow-meta-get",
-    "allow-debug-log"
+    "allow-debug-log",
+    "allow-log-start",
+    "allow-log-stop",
+    "allow-log-status"
   ]
 }

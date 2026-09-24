@@ -1,6 +1,7 @@
 pub mod cpu;
 pub mod disk;
 pub mod gpu;
+pub mod logger;
 pub mod mem;
 pub mod net;
 pub mod procs;

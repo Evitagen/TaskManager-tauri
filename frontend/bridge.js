@@ -16,6 +16,9 @@
     procSample: () => invoke('proc_sample'),
     killProcess: (pid, force) => invoke('proc_kill', { pid, force }),
     meta: () => invoke('meta_get'),
+    logStart: () => invoke('log_start'),
+    logStop: () => invoke('log_stop'),
+    logStatus: () => invoke('log_status'),
     win: {
       min: () => win('minimize'),
       maxToggle: async () => {

@@ -32,6 +32,7 @@ class LineGraph {
     this.fmt = opts.fmt || (v => v.toFixed(1));
     this.showGrid = opts.grid !== false;
     this.windowMs = opts.windowMs || 90_000;
+    this.fixedBase = opts.fixedBase ?? null; // if set, the window is anchored here (static review charts)
     this._mouseX = null;
     this._scale = 100; // y ceiling
     if (opts.hover !== false) {
@@ -52,7 +53,8 @@ class LineGraph {
     return tip;
   }
 
-  render(now = performance.now()) {
+  render(argNow) {
+    const now = this.fixedBase != null ? this.fixedBase : (argNow ?? performance.now());
     if (!this.series.some(s => s.data.length)) return; // nothing to draw yet
     const { canvas, ctx } = this;
     const dpr = window.devicePixelRatio || 1;

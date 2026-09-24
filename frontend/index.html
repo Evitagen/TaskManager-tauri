@@ -57,6 +57,10 @@
         <svg viewBox="0 0 24 24"><path d="M4 5h16v2.2H4zM4 10.9h16v2.2H4zM4 16.8h16v2.2H4z" fill="currentColor"/></svg>
         <span>Running tasks</span>
       </button>
+      <button class="nav-item" data-sec="log">
+        <svg viewBox="0 0 24 24"><path d="M3 3h18v2H3zM3 7.5h12v2H3zM3 12h18v2H3zM3 16.5h15v2H3z" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="19" cy="19" r="3.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M19 17.6v1.5l1.1 .7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        <span>Activity log</span>
+      </button>
       <div class="nav-spacer"></div>
       <div class="nav-host" id="nav-host" title="Host"></div>
     </nav>
@@ -126,6 +130,52 @@
           <div class="page-footer">
             <span class="muted" id="tasks-foot"></span>
             <button class="btn danger" id="btn-end-task" disabled>End task</button>
+          </div>
+        </section>
+
+        <!-- ACTIVITY LOG -->
+        <section class="section" id="sec-log">
+          <div class="sec-head">
+            <div class="sec-title">Activity log <span class="sec-sub" id="log-sub"></span></div>
+            <div class="log-controls">
+              <span class="log-recdot" id="log-recdot" hidden></span>
+              <span class="log-status" id="log-status"></span>
+              <button class="btn" id="btn-log-start">Start log</button>
+              <button class="btn danger" id="btn-log-stop" disabled>Stop</button>
+            </div>
+          </div>
+
+          <!-- idle / recording panel -->
+          <div id="log-live" class="log-live">
+            <div class="log-hero">
+              <div class="log-hero-title" id="log-hero-title">Ready to record</div>
+              <div class="log-hero-sub" id="log-hero-sub">
+                Capture which processes use the CPU and GPU over time, then review the
+                activity — with a flag list that calls out anything doing more than
+                it should (GPU use, sustained CPU, spikes, heavy VRAM, headless hogs).
+              </div>
+            </div>
+            <div class="log-live-hint" id="log-live-hint">
+              Recording runs in the background while you keep using the app — press
+              <b>Stop</b> any time to see the review.
+            </div>
+          </div>
+
+          <!-- review panel (after stop) -->
+          <div id="log-review" class="log-review" hidden>
+            <div class="log-top">
+              <div class="log-graphcol">
+                <div class="log-subhead">CPU usage over time <span class="muted" id="log-graph-sub"></span></div>
+                <div class="graph-box log-graphbox"><canvas id="log-canvas"></canvas><div class="graph-hint">% of total CPU</div></div>
+                <div class="legend" id="log-legend"></div>
+              </div>
+              <div class="log-flagcol">
+                <div class="log-subhead">Suspicious activity <span class="count-chip" id="log-flag-count">0</span></div>
+                <div class="log-flags" id="log-flags"></div>
+              </div>
+            </div>
+            <div class="log-subhead log-table-head">Processes captured <span class="count-chip" id="log-app-count">0</span></div>
+            <div class="table-wrap log-table" id="log-table"></div>
           </div>
         </section>
 

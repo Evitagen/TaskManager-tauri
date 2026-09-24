@@ -266,3 +266,79 @@ pub fn run(app: &tauri::AppHandle) {
     let _ = writeln!(out, "[verify] done");
     app.exit(0);
 }
+
+/// TM_VERIFY_LOG=1: drive the Activity Log tab through the real UI — click the
+/// tab, Start, let it sample for ~12 s (with a few CPU burners so the data is
+/// interesting), Stop, then read back + screenshot the rendered review.
+pub fn run_log(app: &tauri::AppHandle) {
+    std::thread::sleep(Duration::from_millis(12_000));
+    let Some(win) = app.get_webview_window("main") else {
+        eprintln!("[vlog] no main window");
+        app.exit(1);
+        return;
+    };
+    let _ = win.set_title(VERIFY_TITLE);
+    let _ = std::fs::create_dir_all("shots");
+    let mut win_id = None;
+    for _ in 0..20 {
+        if win_id.is_none() {
+            win_id = find_window_id();
+        }
+        if win_id.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    eprintln!("[vlog] window id: {win_id:?}");
+
+    // go to the Log tab, screenshot the idle state
+    let _ = win.eval(
+        "(()=>{ const b=[...document.querySelectorAll('.nav-item')].find(x=>x.dataset.sec==='log'); if(b) b.click(); return 'tab'; })()",
+    );
+    std::thread::sleep(Duration::from_millis(1200));
+    shoot(&win, win_id.as_deref().unwrap_or(""), "shots/vlog_idle.png");
+
+    // a few CPU burners (~1 core each) so the log captures real activity
+    let mut burners: Vec<std::process::Child> = Vec::new();
+    for _ in 0..3 {
+        if let Ok(c) = std::process::Command::new("bash").args(["-c", "while :; do :; done"]).spawn() {
+            burners.push(c);
+        }
+    }
+    eprintln!("[vlog] spawned {} cpu burners", burners.len());
+
+    // start, sample ~12 s, stop — all through the real buttons
+    let _ = win.eval(
+        r#"(async () => {
+          const log = (t) => window.__TAURI_INTERNALS__.invoke('debug_log', { text: t });
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          const startBtn = document.getElementById('btn-log-start');
+          if (!startBtn) { log('VLOG no start button'); return; }
+          startBtn.click();
+          log('VLOG start clicked, disabled=' + startBtn.disabled);
+          await sleep(12000);
+          const stopBtn = document.getElementById('btn-log-stop');
+          if (!stopBtn) { log('VLOG no stop button'); return; }
+          stopBtn.click();
+          log('VLOG stop clicked');
+          await sleep(2500);
+          const flags = document.querySelectorAll('.log-flag').length;
+          const flagNames = [...document.querySelectorAll('.lf-name')].map(e => e.textContent).join('|');
+          const rows = document.querySelectorAll('#log-table tbody tr').length;
+          const legend = (document.getElementById('log-legend') || { textContent: '' }).textContent;
+          const sub = (document.getElementById('log-sub') || { textContent: '' }).textContent;
+          const canv = document.getElementById('log-canvas');
+          const hero = (document.getElementById('log-hero-title') || { textContent: '' }).textContent;
+          log('VLOG REVIEW hero=' + hero + ' flags=' + flags + ' names=' + flagNames + ' rows=' + rows + ' legend=[' + legend + '] sub=' + sub + ' canvas=' + (canv ? canv.width + 'x' + canv.height : 'none'));
+        })()"#
+    );
+
+    std::thread::sleep(Duration::from_millis(16_000));
+    for b in burners.iter_mut() {
+        let _ = b.kill();
+    }
+    std::thread::sleep(Duration::from_millis(600));
+    shoot(&win, win_id.as_deref().unwrap_or(""), "shots/vlog_review.png");
+    eprintln!("[vlog] done");
+    app.exit(0);
+}

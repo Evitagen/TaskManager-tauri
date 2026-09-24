@@ -112,6 +112,7 @@ const TABS = {
   disk: ['sec-disk'],
   net: ['sec-net'],
   tasks: ['sec-tasks'],
+  log: ['sec-log'],
 };
 /* ── fit-to-window ──────────────────────────────────────────────────────── */
 // Each tab fills the window via flex. If a tab's natural content is still
@@ -640,6 +641,189 @@ function renderNetSection(p) {
 
 const statsRowHtml = items => `<div style="display:contents">${items.map(([l, v]) =>
   `<div class="stat"><div class="s-label">${l}</div><div class="s-value">${v == null ? '—' : v}</div></div>`).join('')}</div>`;
+
+/* ── activity log (record per-proc CPU/GPU, review + flag suspicious) ───── */
+const logLive = document.getElementById('log-live');
+const logReview = document.getElementById('log-review');
+const btnLogStart = document.getElementById('btn-log-start');
+const btnLogStop = document.getElementById('btn-log-stop');
+const logStatusEl = document.getElementById('log-status');
+const logRecdot = document.getElementById('log-recdot');
+const logHeroTitle = document.getElementById('log-hero-title');
+const logHeroSub = document.getElementById('log-hero-sub');
+const logLiveHint = document.getElementById('log-live-hint');
+let logState = 'idle';            // idle | recording | review
+let logStatusTimer = null;
+let logGraph = null;
+
+const fElapsed = ms => {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return m ? `${m}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
+};
+
+function setLogState(state) {
+  logState = state;
+  const recording = state === 'recording';
+  const review = state === 'review';
+  logLive.hidden = review;
+  logReview.hidden = !review;
+  btnLogStart.disabled = recording;
+  btnLogStop.disabled = !recording;
+  logRecdot.hidden = !recording;
+  if (state === 'idle') {
+    logHeroTitle.textContent = 'Ready to record';
+    logHeroSub.textContent = 'Capture which processes use the CPU and GPU over time, then review the activity — with a flag list that calls out anything doing more than it should (GPU use, sustained CPU, spikes, heavy VRAM, headless hogs).';
+    logStatusEl.textContent = '';
+  } else if (recording) {
+    logHeroTitle.textContent = 'Recording…';
+    logHeroSub.textContent = 'Sampling every process and GPU client once per second. Keep using the app — stop whenever you like.';
+    logStatusEl.textContent = '0s';
+  }
+  fitPage();
+}
+
+async function onLogStart() {
+  try {
+    const r = await window.api.logStart();
+    if (!r.ok) { logStatusEl.textContent = r.error || 'could not start'; return; }
+    setLogState('recording');
+    logStatusTimer = setInterval(async () => {
+      try {
+        const s = await window.api.logStatus();
+        if (s.active) {
+          logStatusEl.textContent = fElapsed(s.elapsedMs) + ' · ' + s.nTicks + ' ticks';
+          logHeroTitle.textContent = 'Recording… ' + fElapsed(s.elapsedMs);
+        } else {
+          // stopped elsewhere — refresh review
+          clearInterval(logStatusTimer); logStatusTimer = null;
+          onLogStop();
+        }
+      } catch (e) { /* ignore */ }
+    }, 1000);
+  } catch (e) { console.error('logStart', e); }
+}
+
+async function onLogStop() {
+  clearInterval(logStatusTimer); logStatusTimer = null;
+  let data;
+  try { data = await window.api.logStop(); }
+  catch (e) { console.error('logStop', e); return; }
+  renderLogReview(data);
+  setLogState('review');
+}
+
+btnLogStart.onclick = onLogStart;
+btnLogStop.onclick = onLogStop;
+
+function renderLogReview(data) {
+  const sub = document.getElementById('log-sub');
+  if (data.empty) {
+    sub.textContent = '';
+    logLiveHint.hidden = false;
+    logHeroTitle.textContent = 'Nothing captured';
+    logHeroSub.textContent = data.note || 'Start a log and stop it after a while to see the review.';
+    logLive.hidden = false; logReview.hidden = true;
+    setLogState('idle');
+    return;
+  }
+  logLiveHint.hidden = true;
+  const dur = Math.round(data.durationMs / 1000);
+  sub.textContent = `${fElapsed(data.durationMs)} · ${data.nTicks} samples · ${data.cpuCores} cores`;
+  if (data.note) sub.textContent += '  ·  ' + data.note;
+
+  // ── timeline graph ────────────────────────────────────────────────────
+  const base = performance.now();
+  const win = Math.max(data.durationMs, data.intervalMs);
+  const toT = i => base - (win - i * data.intervalMs);
+  const series = [];
+  if (Array.isArray(data.totalSeries) && data.totalSeries.length) {
+    series.push({ name: 'total', color: '#5a5a63', fill: .18, data: data.totalSeries.map(p => ({ t: toT(p.t / data.intervalMs), v: p.v })) });
+  }
+  for (const s of data.series || []) {
+    series.push({ name: s.name, color: s.color, fill: .1, data: s.points.map(p => ({ t: toT(p.i), v: p.v })) });
+  }
+  if (logGraph) { logGraph._ro?.disconnect(); graphs.delete('log'); logGraph = null; }
+  logGraph = new LineGraph(document.getElementById('log-canvas'), {
+    series, mode: 'percent', fixedBase: base, windowMs: win,
+    fmt: v => v.toFixed(1) + '%',
+  });
+  graphs.set('log', logGraph);
+  logGraph.render();
+
+  // legend (top apps that have a line)
+  const legend = document.getElementById('log-legend');
+  legend.innerHTML = (data.series || []).map(s =>
+    `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('') +
+    '<span><i style="background:#5a5a63"></i>total</span>';
+  document.getElementById('log-graph-sub').textContent =
+    data.gpuProcsSupported ? '' : '· per-process GPU unavailable (NVML unreachable) — CPU only';
+
+  // ── suspicious flags ──────────────────────────────────────────────────
+  const flagsEl = document.getElementById('log-flags');
+  const flags = data.flags || [];
+  document.getElementById('log-flag-count').textContent = flags.length;
+  if (!flags.length) {
+    flagsEl.innerHTML = '<div class="log-flag-none muted">Nothing unusual — no process stood out during this window.</div>';
+  } else {
+    const sevLabel = { 2: ['high', 'sev-high'], 1: ['med', 'sev-med'], 0: ['low', 'sev-low'] };
+    flagsEl.innerHTML = flags.map(f => {
+      const [label, cls] = sevLabel[f.severity] || ['low', 'sev-low'];
+      return `<div class="log-flag">
+        <div class="lf-head"><span class="lf-name">${esc(f.name)}</span>
+          <span class="lf-badge ${cls}">${label}</span></div>
+        <div class="lf-meta muted">${esc(f.user)} · avg ${f.avgCpu}% · peak ${f.peakCpu}%${f.gpuPct ? ` · GPU ${f.gpuPct}%` : ''}</div>
+        <ul class="lf-reasons">${f.reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul>
+      </div>`;
+    }).join('');
+  }
+
+  // ── process table ─────────────────────────────────────────────────────
+  const apps = data.apps || [];
+  document.getElementById('log-app-count').textContent = apps.length;
+  const wrap = document.getElementById('log-table');
+  const cols = [
+    { key: 'name', label: 'Process', width: '26%' },
+    { key: 'user', label: 'User', width: '14%' },
+    { key: 'avgCpu', label: 'Avg CPU', num: true, width: '11%' },
+    { key: 'peakCpu', label: 'Peak', num: true, width: '10%' },
+    { key: 'activePct', label: 'Active', num: true, width: '10%' },
+    { key: 'coreSec', label: 'CPU time', num: true, width: '11%' },
+    { key: 'gpuPct', label: 'GPU', num: true, width: '9%' },
+    { key: 'maxVramGb', label: 'VRAM', num: true, width: '9%' },
+  ];
+  let sort = { key: 'coreSec', dir: -1 };
+  const build = () => {
+    const list = [...apps].sort((a, b) => {
+      const va = (sort.key === 'name' || sort.key === 'user') ? String(a[sort.key] ?? '') : (a[sort.key] ?? -1);
+      const vb = (sort.key === 'name' || sort.key === 'user') ? String(b[sort.key] ?? '') : (b[sort.key] ?? -1);
+      return (va > vb ? 1 : va < vb ? -1 : 0) * sort.dir;
+    });
+    const gpuOk = data.gpuProcsSupported;
+    wrap.innerHTML = `<table class="ptable log-htable"><thead><tr>${cols.map(c =>
+      `<th class="${c.num ? 'num' : ''}" data-key="${c.key}" style="width:${c.width}">${c.label}</th>`).join('')}</tr></thead>
+      <tbody>${list.map(a => `<tr>
+        <td><span class="pname">${esc(a.name)}</span>${a.isApp ? '<span class="log-appchip">app</span>' : ''}</td>
+        <td class="v-dim">${esc(a.user)}</td>
+        <td class="num ${vCls(a.avgCpu)}">${fPct(a.avgCpu)}</td>
+        <td class="num ${vCls(a.peakCpu)}">${fPct(a.peakCpu)}</td>
+        <td class="num">${a.activePct}%</td>
+        <td class="num">${a.coreSec >= 10 ? Math.round(a.coreSec) : a.coreSec.toFixed(1)} s</td>
+        <td class="num ${gpuOk ? '' : 'v-dim'}">${gpuOk ? (a.gpuPct ? a.gpuPct + '%' : '—') : '—'}</td>
+        <td class="num ${gpuOk ? '' : 'v-dim'}">${gpuOk && a.maxVramGb ? a.maxVramGb + ' GB' : '—'}</td>
+      </tr>`).join('')}</tbody></table>`;
+    wrap.querySelectorAll('th').forEach(th => {
+      th.classList.toggle('th-sort', th.dataset.key === sort.key);
+      th.classList.toggle('asc', th.dataset.key === sort.key && sort.dir === 1);
+      th.onclick = () => {
+        sort = { key: th.dataset.key, dir: sort.key === th.dataset.key ? -sort.dir : (th.classList.contains('num') ? -1 : 1) };
+        build();
+      };
+    });
+  };
+  build();
+  fitPage();
+}
 
 /* ── polling ────────────────────────────────────────────────────────────── */
 let perfBusy = false, procBusy = false;

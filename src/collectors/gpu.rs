@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::collectors::util::{clamp, read_num, read_text, run};
@@ -286,6 +287,49 @@ impl GpuCollector {
             g
         }).collect()
     }
+}
+
+/// Per-process GPU usage (NVIDIA only): the union of NVML compute and
+/// graphics client apps. Empty when the driver / NVML is unavailable
+/// (missing /dev/nvidia* nodes, AMD/Intel, ...) — callers degrade to a
+/// CPU-only view in that case.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuProc {
+    pub pid: u32,
+    pub name: String,
+    pub vram: Option<u64>, // bytes
+    pub kind: String, // "compute" | "graphics"
+}
+
+fn parse_gpu_app_csv(out: Option<&str>, kind: &str) -> Vec<GpuProc> {
+    let Some(out) = out.filter(|s| !s.trim().is_empty()) else { return Vec::new() };
+    let mut outv = Vec::new();
+    for line in out.lines() {
+        let f: Vec<String> = line.split(',').map(|s| s.trim().to_string()).collect();
+        if f.len() < 2 {
+            continue;
+        }
+        let pid = match f[0].parse::<u32>() { Ok(p) => p, Err(_) => continue };
+        let vram = f.get(2).and_then(|s| s.parse::<f64>().ok()).map(|mb| (mb * 1048576.0) as u64);
+        outv.push(GpuProc { pid, name: f[1].clone(), vram, kind: kind.to_string() });
+    }
+    outv
+}
+
+pub fn gpu_process_usage() -> Vec<GpuProc> {
+    let compute = run("nvidia-smi", &["--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"], 2500);
+    let graphics = run("nvidia-smi", &["--query-graphics-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"], 2500);
+    let mut merged: Vec<GpuProc> = Vec::new();
+    let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for (v, kind) in [(&compute, "compute"), (&graphics, "graphics")] {
+        for p in parse_gpu_app_csv(v.as_deref(), kind) {
+            if seen.insert(p.pid) {
+                merged.push(p);
+            }
+        }
+    }
+    merged
 }
 
 /// Read the first numeric file matching a pattern with one trailing
