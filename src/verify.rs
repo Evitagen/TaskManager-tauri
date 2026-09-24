@@ -35,11 +35,15 @@ fn shoot(win: &tauri::WebviewWindow, win_id: &str, path: &str) {
     // Screenshot via root-window capture + crop to this X window's geometry:
     // direct XGetImage on a GL-backed webkit window can return a stale pixmap
     // under a compositor; the root capture reflects the composited truth.
-    // Force a fresh frame first (1 px size wiggle).
-    let _ = win.set_size(tauri::LogicalSize::new(1239.0, 800.0));
-    std::thread::sleep(Duration::from_millis(120));
-    let _ = win.set_size(tauri::LogicalSize::new(1240.0, 800.0));
-    std::thread::sleep(Duration::from_millis(300));
+    // Force a fresh frame first (1 px size wiggle). Skipped with
+    // TM_NO_JIGGLE=1 (video recording: the live graphs already produce new
+    // frames, and the wiggle briefly changes the window size).
+    if std::env::var("TM_NO_JIGGLE").ok().map(|v| v.is_empty()).unwrap_or(true) {
+        let _ = win.set_size(tauri::LogicalSize::new(1239.0, 800.0));
+        std::thread::sleep(Duration::from_millis(120));
+        let _ = win.set_size(tauri::LogicalSize::new(1240.0, 800.0));
+        std::thread::sleep(Duration::from_millis(300));
+    }
 
     let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let xg = here.join("shots/xg");
@@ -227,6 +231,8 @@ pub fn run(app: &tauri::AppHandle) {
           const sleep = (ms) => new Promise(r => setTimeout(r, ms));
           const row = document.querySelector('tr[data-pid="{pid}"]');
           if (!row) {{ log('KILLTEST row not found pid={pid}'); return; }}
+          row.scrollIntoView({{ block: 'center' }});
+          await sleep(400);
           row.click();
           await sleep(400);
           const btn = document.getElementById('btn-end-task');
@@ -235,6 +241,7 @@ pub fn run(app: &tauri::AppHandle) {
           await sleep(400);
           const modal = document.getElementById('modal');
           if (modal.hidden) {{ log('KILLTEST modal not shown'); return; }}
+          await sleep(1500); // linger on the confirm dialog (visible in recordings)
           document.getElementById('modal-ok').click();
           await sleep(2000);
           const gone = !document.querySelector('tr[data-pid="{pid}"]');

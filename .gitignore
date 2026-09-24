@@ -3,3 +3,4 @@ target/
 gen/
 shots/*
 !shots/*.c
+!shots/*.sh

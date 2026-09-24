@@ -15,6 +15,10 @@
  * Note: exits via exit(0) instead of XCloseDisplay — on this host's X
  * server, a client that sent XTestFakeButtonEvent hangs on close. All
  * events are XFlush()ed before exit, so nothing is lost.
+ *
+ * All XTEST events use device id 0: on the TigerVNC server (and some
+ * hosts) the default pointer (-1) hangs the client on button events,
+ * while device 0 delivers them cleanly.
  */
 #include <X11/Xlib.h>
 #include <X11/extensions/XTest.h>
@@ -23,16 +27,18 @@
 #include <string.h>
 #include <unistd.h>
 
+#define DEV 0
+
 static void move_to(Display *d, int x, int y) {
-    XTestFakeMotionEvent(d, -1, x, y, 0);
+    XTestFakeMotionEvent(d, DEV, x, y, 0);
     XFlush(d);
 }
 
 static void press(Display *d, unsigned int button) {
-    XTestFakeButtonEvent(d, button, True, -1);
+    XTestFakeButtonEvent(d, button, True, DEV);
     XFlush(d);
     usleep(100 * 1000);
-    XTestFakeButtonEvent(d, button, False, -1);
+    XTestFakeButtonEvent(d, button, False, DEV);
     XFlush(d);
     usleep(80 * 1000);
 }
@@ -66,10 +72,10 @@ int main(int argc, char **argv) {
         for (const char *s = argv[2]; *s; s++) {
             KeyCode kc = XKeysymToKeycode(d, XStringToKeysym(s));
             if (!kc) continue;
-            XTestFakeKeyEvent(d, kc, True, -1);
+            XTestFakeKeyEvent(d, kc, True, DEV);
             XFlush(d);
             usleep(25 * 1000);
-            XTestFakeKeyEvent(d, kc, False, -1);
+            XTestFakeKeyEvent(d, kc, False, DEV);
             XFlush(d);
             usleep(40 * 1000);
         }

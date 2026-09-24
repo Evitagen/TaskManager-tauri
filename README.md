@@ -13,6 +13,14 @@ The project is public on
 [GitHub](https://github.com/Evitagen/TaskManager-tauri) under the MIT
 license — issues, forks and contributions are welcome.
 
+## Video tour
+
+A ~45 s walkthrough of every section, recorded from the real running app on
+live system data (overview, per-core CPU, memory, dual-GPU telemetry, disks,
+network, and the full end-task flow with its confirm dialog):
+
+[![Task Manager — a quick tour](docs/tutorial.mp4)](docs/tutorial.mp4)
+
 ## Sections
 
 The window never scrolls: whatever is taller than the content area is scaled
