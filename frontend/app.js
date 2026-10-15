@@ -562,7 +562,7 @@ function renderGpuSection(p) {
         note.className = 'no-telemetry';
         note.innerHTML = `<div><b>${esc(g.model || 'GPU')} detected</b> — live telemetry unavailable.</div>
           <div>Driver ${esc(g.driver || '?')} loaded; NVML unreachable (missing <code>/dev/nvidia*</code> nodes).</div>
-          <div>Fix with <code>sudo nvidia-modprobe -u -c 0</code> — usage appears automatically.</div>`;
+          <div>Fix with <code>sudo nvidia-modprobe -u -c 0 -c 1</code> (one <code>-c</code> per GPU) — usage appears automatically.</div>`;
         shell.el.appendChild(note);
       }
       shell.stats.innerHTML = statsRowHtml(gpuStats(g));
