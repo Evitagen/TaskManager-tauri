@@ -586,7 +586,9 @@ function renderDiskSection(p) {
   if (sec.last !== key) {
     sec.last = key;
     rebuildSection(sec, disks.map(d => [`disk:${d.id}`, d]), (bk, d) => {
-      const shell = makeBlockShell(d.id, [d.type, d.model].filter(Boolean).join(' · '));
+      const mount = d.usage && d.usage.mount;
+      const extra = mount ? '<span class="sb-badge browse-hint">Browse</span>' : '';
+      const shell = makeBlockShell(d.id, [d.type, d.model].filter(Boolean).join(' · '), extra);
       shell.big.style.color = '#ffc860';
       shell.hint.textContent = 'Active time (%)';
       const graphs = [makeGraph(`disk:${bk}`, shell.canvas, {
@@ -594,6 +596,11 @@ function renderDiskSection(p) {
         mode: 'percent', fmt: v => v.toFixed(0) + '%',
       })];
       shell.stats.innerHTML = statsRowHtml(diskStats(d));
+      if (mount) {
+        shell.el.classList.add('disk-browse');
+        shell.el.title = `Browse ${d.id} space usage`;
+        shell.el.addEventListener('click', () => diskgrid.open(d));
+      }
       return { shell, graphs };
     });
   }
@@ -605,6 +612,185 @@ function renderDiskSection(p) {
     updateStatsRow(b.shell.stats, diskStats(d));
   });
 }
+
+/* ── disk space grid — click a disk card → treemap of its biggest items ── */
+// The scan runs once per mount in the background (du-style, `disk_scan_*`
+// commands); drill-down afterwards is purely client-side from the in-memory
+// tree: click a directory tile to descend, Back/breadcrumb to climb.
+const diskgrid = (() => {
+  const secEl = document.getElementById('sec-disk');
+  const bar = document.getElementById('diskgrid-bar');
+  const backBtn = document.getElementById('diskgrid-back');
+  const crumbEl = document.getElementById('diskgrid-crumb');
+  const progEl = document.getElementById('diskgrid-progress');
+  const closeBtn = document.getElementById('diskgrid-close');
+  const host = document.getElementById('disk-grid');
+  const cv = document.getElementById('diskgrid-canvas');
+  const tip = document.getElementById('diskgrid-tip');
+  const emptyEl = document.getElementById('diskgrid-empty');
+  let grid = null;      // TreemapGrid instance (lazy — after first open)
+  let stack = [];       // path of nodes from the tree root down
+  let rootPath = '';
+  let scanning = false;
+  let gen = 0;          // generation counter — stale polls stop themselves
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function ensureGrid() {
+    if (!grid) grid = new TreemapGrid(cv, tip, { onOpen: openNode });
+    return grid;
+  }
+
+  const cur = () => stack[stack.length - 1];
+
+  // The largest kept children plus a display-only "… N more" bucket holding
+  // the bytes of entries dropped by the per-directory cap.
+  function entriesFor(node) {
+    const list = node.children.map((c) => ({ ...c, fmtSize: fBytes(c.size) }));
+    if (node.omitted > 0 && node.hidden > 0) {
+      list.push({ name: `… ${node.omitted} more`, kind: 'other', size: node.hidden, fmtSize: fBytes(node.hidden) });
+    }
+    list.sort((a, b) => b.size - a.size);
+    return list;
+  }
+
+  function render() {
+    const node = cur();
+    if (!node) return;
+    emptyEl.hidden = true;
+    ensureGrid().setData(entriesFor(node));
+    renderCrumb();
+    backBtn.disabled = stack.length <= 1;
+  }
+
+  function renderCrumb() {
+    crumbEl.innerHTML = '';
+    stack.forEach((n, i) => {
+      if (i) {
+        const sep = document.createElement('span');
+        sep.className = 'crumb-sep';
+        sep.textContent = '›';
+        crumbEl.appendChild(sep);
+      }
+      const b = document.createElement('button');
+      b.className = 'crumb-link' + (i === stack.length - 1 ? ' cur' : '');
+      b.textContent = i === 0 ? (rootPath || n.name) : n.name;
+      b.title = i === 0 ? rootPath : n.name;
+      if (i < stack.length - 1) {
+        b.addEventListener('click', () => { stack = stack.slice(0, i + 1); render(); });
+      }
+      crumbEl.appendChild(b);
+    });
+  }
+
+  function openNode(node) {
+    stack.push(node);
+    render();
+  }
+
+  function showEmpty(html) {
+    emptyEl.innerHTML = html;
+    emptyEl.hidden = false;
+  }
+
+  // The backend runs one scan at a time; if another is still winding down,
+  // cancel it and retry.
+  async function startScan(path, g) {
+    for (let i = 0; i < 60; i++) {
+      if (g !== gen) return false;
+      const r = await api.diskScanStart(path);
+      if (r.ok) return true;
+      if (!/already running/.test(r.error || '')) {
+        showEmpty(`<div><b>Scan failed</b></div><div>${esc(r.error)}</div>`);
+        return false;
+      }
+      await api.diskScanCancel();
+      await sleep(200);
+    }
+    showEmpty('<div><b>Could not start the scan</b></div>');
+    return false;
+  }
+
+  async function poll(g) {
+    while (g === gen) {
+      const s = await api.diskScanStatus();
+      if (g !== gen) return;
+      if (s.done) {
+        scanning = false;
+        progEl.hidden = true;
+        if (s.cancelled) { showEmpty('<div><b>Scan cancelled</b></div>'); return; }
+        if (s.error) { showEmpty(`<div><b>Scan failed</b></div><div>${esc(s.error)}</div>`); return; }
+        if (!s.tree || !s.tree.children) { showEmpty('<div><b>Nothing to show</b></div>'); return; }
+        stack = [s.tree];
+        render();
+        return;
+      }
+      scanning = true;
+      emptyEl.hidden = false;
+      showEmpty(`<div><b>Scanning ${esc(s.path)}</b></div>
+        <div class="muted">${s.files.toLocaleString()} files · ${fBytes(s.bytes)} · ${Math.round(s.elapsedMs / 1000)}s</div>
+        <div class="muted">${esc(s.current || '')}</div>`);
+      progEl.hidden = false;
+      progEl.textContent = `${s.files.toLocaleString()} files · ${fBytes(s.bytes)} · ${Math.round(s.elapsedMs / 1000)}s` +
+        (s.errors ? ` · ${s.errors} unreadable` : '');
+      await sleep(300);
+    }
+  }
+
+  async function open(disk) {
+    gen++;
+    const g = gen;
+    stack = [];
+    scanning = false;
+    rootPath = disk.usage && disk.usage.mount ? disk.usage.mount : '';
+    secEl.classList.add('grid-on');
+    bar.hidden = false;
+    host.hidden = false;
+    crumbEl.innerHTML = '';
+    backBtn.disabled = true;
+    progEl.hidden = true;
+    ensureGrid().clear();
+    if (!rootPath) {
+      showEmpty(`<div><b>${esc(disk.model || disk.type || disk.id)}</b> has no mount point.</div>
+        <div class="muted">Nothing to browse — the disk may be unformatted or offline.</div>`);
+      return;
+    }
+    showEmpty(`<div><b>${esc(rootPath)}</b></div><div class="muted">Starting scan…</div>`);
+    if (await startScan(rootPath, g)) poll(g);
+  }
+
+  function close() {
+    gen++;
+    if (scanning) api.diskScanCancel().catch(() => {});
+    scanning = false;
+    secEl.classList.remove('grid-on');
+    host.hidden = true;
+    bar.hidden = true;
+    progEl.hidden = true;
+    if (grid) grid.clear();
+  }
+
+  backBtn.addEventListener('click', () => {
+    if (stack.length > 1) { stack.pop(); render(); }
+  });
+  closeBtn.addEventListener('click', close);
+  window.addEventListener('resize', () => { if (grid && !host.hidden) grid.draw(); });
+
+  return {
+    open, close, isOpen: () => !host.hidden,
+    // verification helper: drill down by directory name without a synthetic click
+    _testDrill: (name) => {
+      const n = stack[stack.length - 1];
+      if (!n) return false;
+      const c = n.children.find((x) => x.name === name && x.kind === 'dir');
+      if (!c) return false;
+      openNode(c);
+      return true;
+    },
+  };
+})();
+
+// exposed for verify modes / debugging
+window.__diskgrid = diskgrid;
 
 function renderNetSection(p) {
   const sec = blockSections.net;

@@ -342,3 +342,156 @@ pub fn run_log(app: &tauri::AppHandle) {
     eprintln!("[vlog] done");
     app.exit(0);
 }
+
+/// TM_VERIFY_DISKGRID=1: build a synthetic directory tree under /tmp, scan it
+/// through the real disk_scan_* commands, open the treemap, drill down into a
+/// folder, hit Back, and screenshot each stage.
+pub fn run_diskgrid(app: &tauri::AppHandle) {
+    std::thread::sleep(Duration::from_millis(12_000));
+    let Some(win) = app.get_webview_window("main") else {
+        eprintln!("[dgrid] no main window");
+        app.exit(1);
+        return;
+    };
+    let _ = win.set_title(VERIFY_TITLE);
+    let _ = std::fs::create_dir_all("shots");
+    let mut win_id = None;
+    for _ in 0..20 {
+        if win_id.is_none() {
+            win_id = find_window_id();
+        }
+        if win_id.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    eprintln!("[dgrid] window id: {win_id:?}");
+
+    // Synthetic demo tree. Files are sparse (set_len): the scanner reports
+    // st_size, so ~1 GB of data costs no real disk space or write time.
+    let root = std::path::Path::new("/tmp/tm-diskgrid-demo");
+    let _ = std::fs::remove_dir_all(root);
+    let mk = |rel: &str| {
+        let p = root.join(rel);
+        let _ = std::fs::create_dir_all(&p);
+        p
+    };
+    let wf = |dir: &std::path::Path, name: &str, mb: u64| {
+        let _ = std::fs::create_dir_all(dir);
+        let p = dir.join(name);
+        if let Ok(f) = std::fs::File::create(&p) {
+            let _ = f.set_len(mb * 1024 * 1024);
+        }
+    };
+    let docs = mk("Documents");
+    wf(&docs, "report.pdf", 120);
+    wf(&docs, "budget.xlsx", 80);
+    wf(&docs, "notes.txt", 30);
+    wf(&mk("Documents/sub"), "dataset.bin", 50);
+    for i in 0..20 {
+        wf(&docs, &format!("small_{i:02}.dat"), 1);
+    }
+    wf(&mk("Videos"), "movie.mkv", 200);
+    wf(&mk("Videos"), "clip.mp4", 90);
+    let ph = mk("Photos");
+    wf(&ph, "vacation.raw", 60);
+    wf(&ph, "wedding.raw", 45);
+    wf(&ph, "birthday.raw", 25);
+    wf(&ph, "pets.raw", 15);
+    wf(&mk("Music"), "album.flac", 40);
+    wf(&mk(".cache"), "thumbnails", 10);
+    wf(root, "archive.tar", 150);
+    wf(root, "readme.txt", 2);
+    eprintln!("[dgrid] demo tree ready at {}", root.display());
+
+    // stage 1: switch to the Disks tab and open the treemap for the demo tree
+    let _ = win.eval(
+        r#"(async () => {
+          const log = (t) => window.__TAURI_INTERNALS__.invoke('debug_log', { text: t });
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          const tab = [...document.querySelectorAll('.nav-item')].find(x => x.dataset.sec === 'disk');
+          if (tab) tab.click();
+          await sleep(800);
+          log('DGRID cards=' + document.querySelectorAll('#disk-blocks .subblock').length +
+              ' browse=' + document.querySelectorAll('#disk-blocks .subblock.disk-browse').length);
+          window.__diskgrid.open({ id: 'demo', type: 'demo', model: 'synthetic',
+                                   usage: { mount: '/tmp/tm-diskgrid-demo', usedPct: 61 } });
+          await sleep(4000);
+          const empty = document.getElementById('diskgrid-empty');
+          log('DGRID open gridOn=' + document.getElementById('sec-disk').className +
+              ' emptyHidden=' + empty.hidden +
+              ' crumb=' + document.getElementById('diskgrid-crumb').textContent +
+              ' progress=' + document.getElementById('diskgrid-progress').textContent);
+        })()"#,
+    );
+    std::thread::sleep(Duration::from_millis(5_400));
+    shoot(&win, win_id.as_deref().unwrap_or(""), "shots/dgrid_root.png");
+
+    // stage 2: drill down into Documents
+    let _ = win.eval(
+        r#"(async () => {
+          const log = (t) => window.__TAURI_INTERNALS__.invoke('debug_log', { text: t });
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          const ok = window.__diskgrid._testDrill('Documents');
+          await sleep(400);
+          log('DGRID drill ok=' + ok +
+              ' crumb=' + document.getElementById('diskgrid-crumb').textContent +
+              ' backDisabled=' + document.getElementById('diskgrid-back').disabled);
+        })()"#,
+    );
+    std::thread::sleep(Duration::from_millis(1_000));
+    shoot(&win, win_id.as_deref().unwrap_or(""), "shots/dgrid_drill.png");
+
+    // stage 3: Back returns to the root view
+    let _ = win.eval(
+        r#"(async () => {
+          const log = (t) => window.__TAURI_INTERNALS__.invoke('debug_log', { text: t });
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          document.getElementById('diskgrid-back').click();
+          await sleep(400);
+          log('DGRID back crumb=' + document.getElementById('diskgrid-crumb').textContent +
+              ' backDisabled=' + document.getElementById('diskgrid-back').disabled);
+        })()"#,
+    );
+    std::thread::sleep(Duration::from_millis(1_000));
+    shoot(&win, win_id.as_deref().unwrap_or(""), "shots/dgrid_back.png");
+
+    // stage 4: close returns to the disk cards
+    let _ = win.eval(
+        r#"(async () => {
+          const log = (t) => window.__TAURI_INTERNALS__.invoke('debug_log', { text: t });
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          document.getElementById('diskgrid-close').click();
+          await sleep(400);
+          log('DGRID close gridOn=' + document.getElementById('sec-disk').className +
+              ' hostHidden=' + document.getElementById('disk-grid').hidden +
+              ' cardsVisible=' + (document.querySelector('#disk-blocks .subblock') ? 'yes' : 'no'));
+        })()"#,
+    );
+    std::thread::sleep(Duration::from_millis(1_000));
+    shoot(&win, win_id.as_deref().unwrap_or(""), "shots/dgrid_cards.png");
+
+    // stage 5: the real user path — click an actual disk card, watch the scan
+    // start against its mount point, then close (cancels the in-flight scan).
+    let _ = win.eval(
+        r#"(async () => {
+          const log = (t) => window.__TAURI_INTERNALS__.invoke('debug_log', { text: t });
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          const card = document.querySelector('#disk-blocks .subblock.disk-browse');
+          if (!card) { log('DGRID realcard=none'); return; }
+          card.click();
+          await sleep(3000);
+          const empty = document.getElementById('diskgrid-empty');
+          log('DGRID realcard open gridOn=' + document.getElementById('sec-disk').className +
+              ' emptyHidden=' + empty.hidden +
+              ' emptyText=' + empty.textContent.replace(/\s+/g, ' ').slice(0, 160) +
+              ' progress=' + document.getElementById('diskgrid-progress').textContent);
+          document.getElementById('diskgrid-close').click();
+          await sleep(600);
+          log('DGRID realcard closed hostHidden=' + document.getElementById('disk-grid').hidden);
+        })()"#,
+    );
+    std::thread::sleep(Duration::from_millis(5_000));
+    eprintln!("[dgrid] done");
+    app.exit(0);
+}

@@ -1,5 +1,6 @@
 pub mod cpu;
 pub mod disk;
+pub mod diskscan;
 pub mod gpu;
 pub mod logger;
 pub mod mem;

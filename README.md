@@ -85,6 +85,20 @@ type (SSD/HDD from `queue/rotational`) and model. Card order follows the
 `/proc/diskstats` line order, so the grid is stable between ticks — a
 regression test pins exactly that.
 
+Clicking a card with a mount opens a **treemap drill-down** of that mount
+point: a squarified grid (Bruls/Huizing/van Wijk) where each folder or file
+gets an area proportional to its size — the `Documents` block is visibly
+bigger than `Music` because it holds more bytes. Folders are blue, files
+amber; the largest 250 entries per directory are drawn and the remainder
+collapses into an `… N more` block (so parent totals stay exact — the
+dropped bytes are tracked in a per-node `hidden` field). Click a rectangle
+to descend into that folder, use the breadcrumb to jump back up, or Back to
+step out one level; Close cancels any in-flight scan and returns to the
+cards. Scanning runs on a 6-worker pool with a `du -x` filesystem barrier
+(never crosses into other mounts), counts symlink sizes without following
+them, and streams live progress (files · bytes · elapsed · unreadable)
+while the renderer polls every 300 ms.
+
 ### Network
 
 ![Network](screenshots/net.png)
@@ -169,7 +183,7 @@ libX11 dev headers (to build `shots/xg`, the X-geometry probe).
 
 ## Verification harness
 
-Two env-gated modes are wired into `lib.rs` (neither affects normal use):
+Env-gated modes are wired into `lib.rs` (none affect normal use):
 
 - `TM_VERIFY=1 ./target/debug/task-manager`
   Warms up for 100 s (so the graphs collect a full 90 s history window for
@@ -185,6 +199,17 @@ Two env-gated modes are wired into `lib.rs` (neither affects normal use):
   the fit-scaler's measured vs. available height, and the per-core right-click
   flow (context menu → "Show logical cores" → 28 core cells). Exits.
 
+- `TM_VERIFY_LOG=1 ./target/debug/task-manager`
+  Switches to the Activity log tab with a couple of spawned CPU burners
+  running, waits for a few aggregation ticks, then screenshots the log.
+
+- `TM_VERIFY_DISKGRID=1 ./target/debug/task-manager`
+  Builds a ~1 GB synthetic directory tree under `/tmp/tm-diskgrid-demo`
+  (sparse files — the scanner reports `st_size`, so no real bytes are
+  written), scans it through the real `disk_scan_*` commands, screenshots
+  the root treemap, drills into `Documents` via the breadcrumb, goes Back,
+  closes, then clicks a real disk card to prove the live scan path. Exits.
+
 Screenshots are written to `shots/tauri_<tab>.png`. Because Tauri v2 exposes no
 window-capture API on Linux, the harness captures the **root window** with
 `import -window root` and crops to this app's X window geometry (queried by the
@@ -198,6 +223,7 @@ unambiguously even when other windows share the plain title.
 `proc_sample` → `{ ts, procs[{pid,name,state,uid,user,cpu,mem,diskBs,netBs,cmdline,isApp,isSelf}], selfUid }`
 `meta_get`    → `{ app, version, platform, arch, hostname }`
 `proc_kill`   → `{ ok, error? }`
+`disk_scan_status` tree node → `{ name, kind:"dir"|"file", size, own, children[], omitted, hidden }`
 
 Field names are camelCase (`serde rename_all`) and match every consumer in
 `frontend/app.js`. Rates (B/s, %, MHz, GHz) are computed as deltas over the
@@ -236,6 +262,12 @@ Field names are camelCase (`serde rename_all`) and match every consumer in
 | `proc_kill`   | `{pid, force}`  | `{ok, error?}` (EPERM if pid≤1 or self) |
 | `meta_get`    | —               | meta payload                     |
 | `debug_log`   | `{text}`        | — (verify-mode logging hook)     |
+| `log_start`   | `{}`            | `{ok, error?}`                   |
+| `log_stop`    | `{}`            | `{ok, error?}`                   |
+| `log_status`  | `{}`            | activity-log rows payload        |
+| `disk_scan_start` | `{path}`    | `{ok, error?}` ("a scan is already running" if one is in flight) |
+| `disk_scan_status` | `{}`       | `{scanning, done, cancelled, error?, path, current, elapsedMs, files, bytes, errors, otherFs, tree?}` — `tree` only once done and OK |
+| `disk_scan_cancel` | `{}`       | `{ok, error?}`                   |
 
 Window controls use the `plugin:window|…` core commands (`minimize`,
 `maximize`, `unmaximize`, `is_maximized`, `close`, `start_dragging`,

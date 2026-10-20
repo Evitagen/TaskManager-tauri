@@ -108,8 +108,21 @@
         <section class="section" id="sec-disk">
           <div class="sec-head">
             <div class="sec-title">Disks <span class="sec-sub" id="disk-sub"></span></div>
+            <div class="diskgrid-bar" id="diskgrid-bar" hidden>
+              <button class="btn ghost" id="diskgrid-back">&#8592; Back</button>
+              <div class="diskgrid-crumb" id="diskgrid-crumb"></div>
+              <span class="diskgrid-progress" id="diskgrid-progress"></span>
+              <button class="btn ghost" id="diskgrid-close">&#10005;</button>
+            </div>
           </div>
           <div class="subgrid" id="disk-blocks"></div>
+          <div class="diskgrid" id="disk-grid" hidden>
+            <div class="diskgrid-canvasbox">
+              <canvas id="diskgrid-canvas"></canvas>
+              <div class="diskgrid-tip" id="diskgrid-tip" hidden></div>
+              <div class="no-telemetry diskgrid-empty" id="diskgrid-empty" hidden></div>
+            </div>
+          </div>
         </section>
 
         <!-- NETWORK (all adapters in one section) -->
@@ -202,6 +215,7 @@
 
   <script src="bridge.js"></script>
   <script src="graph.js"></script>
+  <script src="treemap.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

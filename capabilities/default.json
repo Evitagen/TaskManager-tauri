@@ -19,6 +19,9 @@
     "allow-debug-log",
     "allow-log-start",
     "allow-log-stop",
-    "allow-log-status"
+    "allow-log-status",
+    "allow-disk-scan-start",
+    "allow-disk-scan-status",
+    "allow-disk-scan-cancel"
   ]
 }

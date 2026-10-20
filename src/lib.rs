@@ -3,6 +3,7 @@ mod verify;
 
 use std::sync::{Arc, Mutex};
 
+use collectors::diskscan::ScanShared;
 use collectors::logger::{start_worker, ProcLogger};
 use collectors::procs;
 use collectors::Hub;
@@ -105,6 +106,25 @@ fn log_status(state: tauri::State<'_, Arc<Mutex<ProcLogger>>>) -> Value {
     })
 }
 
+/// Start a du-style background scan of a directory (Disks tab → treemap).
+#[tauri::command]
+fn disk_scan_start(state: tauri::State<'_, Arc<ScanShared>>, path: String) -> Value {
+    collectors::diskscan::start(&state, &path)
+}
+
+/// Poll the running (or finished) disk scan; includes the tree once done.
+#[tauri::command]
+fn disk_scan_status(state: tauri::State<'_, Arc<ScanShared>>) -> Value {
+    collectors::diskscan::status(&state)
+}
+
+/// Cancel the running disk scan.
+#[tauri::command]
+fn disk_scan_cancel(state: tauri::State<'_, Arc<ScanShared>>) -> Value {
+    collectors::diskscan::cancel(&state);
+    json!({ "ok": true })
+}
+
 pub fn run() {
     // WebKitGTK's accelerated (GL) compositing path does not reach the X
     // window pixmap / compositor on this host (picom xrender backend), which
@@ -113,9 +133,11 @@ pub fn run() {
     std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
 
     let log_state: Arc<Mutex<ProcLogger>> = Arc::new(Mutex::new(ProcLogger::new()));
+    let scan_state: Arc<ScanShared> = Arc::new(ScanShared::new());
     let mut builder = tauri::Builder::default()
         .manage(Mutex::new(Hub::new()))
         .manage(log_state)
+        .manage(scan_state)
         .invoke_handler(tauri::generate_handler![
             perf_sample,
             proc_sample,
@@ -125,6 +147,9 @@ pub fn run() {
             log_start,
             log_stop,
             log_status,
+            disk_scan_start,
+            disk_scan_status,
+            disk_scan_cancel,
         ]);
     if std::env::var("TM_VERIFY_LAYOUT").ok().map(|v| !v.is_empty()).unwrap_or(false) {
         builder = builder.setup(|app| {
@@ -144,6 +169,13 @@ pub fn run() {
         builder = builder.setup(|app| {
             let handle = app.handle().clone();
             std::thread::spawn(move || verify::run_log(&handle));
+            Ok(())
+        });
+    }
+    if std::env::var("TM_VERIFY_DISKGRID").ok().map(|v| !v.is_empty()).unwrap_or(false) {
+        builder = builder.setup(|app| {
+            let handle = app.handle().clone();
+            std::thread::spawn(move || verify::run_diskgrid(&handle));
             Ok(())
         });
     }

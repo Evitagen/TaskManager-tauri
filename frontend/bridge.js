@@ -19,6 +19,9 @@
     logStart: () => invoke('log_start'),
     logStop: () => invoke('log_stop'),
     logStatus: () => invoke('log_status'),
+    diskScanStart: (path) => invoke('disk_scan_start', { path }),
+    diskScanStatus: () => invoke('disk_scan_status'),
+    diskScanCancel: () => invoke('disk_scan_cancel'),
     win: {
       min: () => win('minimize'),
       maxToggle: async () => {
