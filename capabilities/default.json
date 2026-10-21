@@ -22,6 +22,8 @@
     "allow-log-status",
     "allow-disk-scan-start",
     "allow-disk-scan-status",
-    "allow-disk-scan-cancel"
+    "allow-disk-scan-tree",
+    "allow-disk-scan-cancel",
+    "allow-open-in-files"
   ]
 }

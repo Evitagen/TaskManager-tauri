@@ -268,8 +268,10 @@ Field names are camelCase (`serde rename_all`) and match every consumer in
 | `log_stop`    | `{}`            | `{ok, error?}`                   |
 | `log_status`  | `{}`            | activity-log rows payload        |
 | `disk_scan_start` | `{path}`    | `{ok, error?}` ("a scan is already running" if one is in flight) |
-| `disk_scan_status` | `{}`       | `{scanning, done, cancelled, error?, path, current, elapsedMs, files, bytes, errors, otherFs, tree?}` — `tree` only once done and OK |
+| `disk_scan_status` | `{}`       | `{scanning, done, cancelled, error?, path, current, elapsedMs, files, bytes, errors, otherFs, topFiles?}` — `topFiles` (largest 500 files, `{name,size,path}`) only once done and OK; deliberately tree-free |
+| `disk_scan_tree` | `{}`           | `{ok, tree?}` — the full tree, serialized once and cached; fetched lazily on first folder drill-down |
 | `disk_scan_cancel` | `{}`       | `{ok, error?}`                   |
+| `open_in_files` | `{path}`       | `{ok, error?}` — opens a directory in the desktop file manager |
 
 Window controls use the `plugin:window|…` core commands (`minimize`,
 `maximize`, `unmaximize`, `is_maximized`, `close`, `start_dragging`,

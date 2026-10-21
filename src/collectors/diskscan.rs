@@ -13,10 +13,11 @@
 // subtrees in parallel. Progress is published into a shared state that the
 // renderer polls with `disk_scan_status` (see the frontend bridge).
 
+use std::collections::BinaryHeap;
 use std::collections::VecDeque;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -27,6 +28,8 @@ use super::util::now_ms;
 
 /// Largest entries kept per directory; the rest is counted as omitted.
 const CHILD_CAP: usize = 250;
+/// Largest files tracked globally (the flat "Top files" view).
+const TOP_KEEP: usize = 500;
 /// Worker threads scanning top-level subtrees in parallel.
 const WORKERS: usize = 6;
 /// Progress publication interval (the renderer polls at ~300 ms).
@@ -53,6 +56,56 @@ fn node_dir(name: &str) -> SNode {
 
 fn node_file(name: &str, size: u64) -> SNode {
     SNode { name: name.into(), kind: "file".into(), size, children: Vec::new(), omitted: 0, hidden: 0 }
+}
+
+/// One of the globally largest files, with its path relative to the scan root.
+#[derive(Serialize)]
+struct TopFile {
+    name: String,
+    size: u64,
+    path: String,
+}
+
+/// Bounded min-heap of the TOP_KEEP largest files seen (ordered by size so
+/// the smallest kept entry is the one to evict).
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct TopHeapItem(TopFile);
+
+impl PartialEq for TopFile {
+    fn eq(&self, o: &Self) -> bool {
+        self.size == o.size && self.path == o.path
+    }
+}
+impl Eq for TopFile {}
+impl PartialOrd for TopFile {
+    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(o)) }
+}
+impl Ord for TopFile {
+    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+        self.size.cmp(&o.size).then_with(|| self.path.cmp(&o.path))
+    }
+}
+
+/// Track a candidate file in the global top list. Cheap early-out: small
+/// files (the overwhelming majority) only pay one mutex probe, no allocation.
+fn top_push(sh: &ScanShared, scan_root: &Path, abs: &Path, size: u64) {
+    let mut t = sh.top.lock().unwrap_or_else(|e| e.into_inner());
+    if t.len() >= TOP_KEEP {
+        let keep = match t.peek() {
+            Some(std::cmp::Reverse(item)) => size > item.0.size,
+            None => true,
+        };
+        if !keep {
+            return;
+        }
+        t.pop();
+    }
+    let rel = abs.strip_prefix(scan_root).unwrap_or(abs);
+    t.push(std::cmp::Reverse(TopHeapItem(TopFile {
+        name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        size,
+        path: rel.to_string_lossy().into_owned(),
+    })));
 }
 
 /// Keep the CHILD_CAP largest children of a directory; sizes of dropped
@@ -91,6 +144,7 @@ pub struct ScanShared {
     bytes: AtomicU64,
     errors: AtomicU64,
     other_fs: AtomicU64,
+    top: Mutex<BinaryHeap<std::cmp::Reverse<TopHeapItem>>>,
     inner: Mutex<Inner>,
 }
 
@@ -103,6 +157,10 @@ struct Inner {
     cancelled: bool,
     error: Option<String>,
     tree: Option<SNode>,
+    /// Serialized tree, built lazily on the first `disk_scan_tree` call.
+    tree_json: Option<serde_json::Value>,
+    /// Top-files array, built once when the scan finishes.
+    top_files: Option<serde_json::Value>,
 }
 
 impl ScanShared {
@@ -113,6 +171,7 @@ impl ScanShared {
             bytes: AtomicU64::new(0),
             errors: AtomicU64::new(0),
             other_fs: AtomicU64::new(0),
+            top: Mutex::new(BinaryHeap::new()),
             inner: Mutex::new(Inner {
                 scanning: false,
                 path: String::new(),
@@ -122,6 +181,8 @@ impl ScanShared {
                 cancelled: false,
                 error: None,
                 tree: None,
+                tree_json: None,
+                top_files: None,
             }),
         }
     }
@@ -139,7 +200,7 @@ struct Frame {
 
 /// Scan the subtree at `root` (already known to be a directory on `root_dev`)
 /// and send the finished node (or None on cancel/error) over `out`.
-fn scan_subtree(root: &PathBuf, name: &str, root_dev: u64, sh: &ScanShared, out: &mpsc::Sender<Option<SNode>>) {
+fn scan_subtree(root: &PathBuf, name: &str, scan_root: &Path, root_dev: u64, sh: &ScanShared, out: &mpsc::Sender<Option<SNode>>) {
     let it = match fs::read_dir(root) {
         Ok(i) => i,
         Err(_) => {
@@ -223,6 +284,8 @@ fn scan_subtree(root: &PathBuf, name: &str, root_dev: u64, sh: &ScanShared, out:
                         // file or symlink: lstat size only, never follow
                         let sz = entry.metadata().map(|m| m.len()).unwrap_or(0);
                         let name = entry.file_name().to_string_lossy().into_owned();
+                        let abs = stack[top].path.join(&name);
+                        top_push(sh, scan_root, &abs, sz);
                         let fr = &mut stack[top];
                         add_child(&mut fr.node, &mut fr.count, node_file(&name, sz));
                         sh.files.fetch_add(1, Ordering::Relaxed);
@@ -299,6 +362,8 @@ fn coordinator(sh: Arc<ScanShared>, root: PathBuf, root_dev: u64) {
                         Ok(_) => {
                             let sz = e.metadata().map(|m| m.len()).unwrap_or(0);
                             let name = e.file_name().to_string_lossy().into_owned();
+                            let abs = root.join(&name);
+                            top_push(&sh, &root, &abs, sz);
                             add_child(&mut root_node, &mut root_count, node_file(&name, sz));
                             sh.files.fetch_add(1, Ordering::Relaxed);
                             sh.bytes.fetch_add(sz, Ordering::Relaxed);
@@ -320,10 +385,11 @@ fn coordinator(sh: Arc<ScanShared>, root: PathBuf, root_dev: u64) {
             let q_w = queue.clone();
             let tx_w = tx.clone();
             let p_w = pending.clone();
+            let sr_w = root.clone();
             handles.push(std::thread::spawn(move || loop {
                 let next = q_w.lock().unwrap_or_else(|err| err.into_inner()).pop_front();
                 let Some((path, name)) = next else { break };
-                scan_subtree(&path, &name, root_dev, &sh_w, &tx_w);
+                scan_subtree(&path, &name, &sr_w, root_dev, &sh_w, &tx_w);
                 p_w.fetch_sub(1, Ordering::Relaxed);
             }));
         }
@@ -355,12 +421,21 @@ fn coordinator(sh: Arc<ScanShared>, root: PathBuf, root_dev: u64) {
             let _ = h.join();
         }
 
+        // Global top files, largest first (ties broken by path for stability).
+        let top_files = {
+            let mut t = sh.top.lock().unwrap_or_else(|e| e.into_inner());
+            let mut v: Vec<TopFile> = std::mem::take(&mut *t).into_vec().into_iter().map(|std::cmp::Reverse(i)| i.0).collect();
+            v.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.path.cmp(&b.path)));
+            serde_json::to_value(&v).unwrap_or(serde_json::Value::Null)
+        };
+
         let mut g = sh.inner.lock().unwrap_or_else(|e| e.into_inner());
         g.done = true;
         g.scanning = false;
         g.current.clear();
         g.cancelled = cancelled;
         g.tree = if cancelled { None } else { Some(root_node) };
+        g.top_files = if cancelled { None } else { Some(top_files) };
         return;
     }
 
@@ -402,6 +477,8 @@ pub fn start(sh: &Arc<ScanShared>, path: &str) -> serde_json::Value {
             cancelled: false,
             error: None,
             tree: None,
+            tree_json: None,
+            top_files: None,
         };
     }
     sh.cancel.store(false, Ordering::Relaxed);
@@ -409,6 +486,7 @@ pub fn start(sh: &Arc<ScanShared>, path: &str) -> serde_json::Value {
     sh.bytes.store(0, Ordering::Relaxed);
     sh.errors.store(0, Ordering::Relaxed);
     sh.other_fs.store(0, Ordering::Relaxed);
+    sh.top.lock().unwrap_or_else(|e| e.into_inner()).clear();
 
     let sh2 = sh.clone();
     std::thread::spawn(move || coordinator(sh2, root, root_dev));
@@ -419,14 +497,11 @@ pub fn cancel(sh: &Arc<ScanShared>) {
     sh.cancel.store(true, Ordering::Relaxed);
 }
 
-/// Poll payload for the renderer.
+/// Poll payload for the renderer. Deliberately tree-free: the full tree can
+/// be tens of MB on a big mount, so it is fetched once via `tree()` only
+/// when the user actually drills into a folder.
 pub fn status(sh: &Arc<ScanShared>) -> serde_json::Value {
     let g = sh.inner.lock().unwrap_or_else(|e| e.into_inner());
-    let tree = if g.done && !g.cancelled && g.error.is_none() {
-        g.tree.as_ref().map(|t| serde_json::to_value(t).unwrap_or(serde_json::Value::Null))
-    } else {
-        None
-    };
     serde_json::json!({
         "scanning": g.scanning && !g.done,
         "done": g.done,
@@ -439,6 +514,23 @@ pub fn status(sh: &Arc<ScanShared>) -> serde_json::Value {
         "bytes": sh.bytes.load(Ordering::Relaxed),
         "errors": sh.errors.load(Ordering::Relaxed),
         "otherFs": sh.other_fs.load(Ordering::Relaxed),
-        "tree": tree,
+        "topFiles": g.top_files,
     })
+}
+
+/// The finished scan's directory tree, serialized once and cached.
+pub fn tree(sh: &Arc<ScanShared>) -> serde_json::Value {
+    let mut g = sh.inner.lock().unwrap_or_else(|e| e.into_inner());
+    if !g.done || g.cancelled || g.error.is_some() {
+        return serde_json::json!({ "ok": false, "error": "no completed scan" });
+    }
+    if g.tree_json.is_none() {
+        if let Some(t) = &g.tree {
+            g.tree_json = Some(serde_json::to_value(t).unwrap_or(serde_json::Value::Null));
+        }
+    }
+    match &g.tree_json {
+        Some(j) => serde_json::json!({ "ok": true, "tree": j.clone() }),
+        None => serde_json::json!({ "ok": false, "error": "no tree" }),
+    }
 }

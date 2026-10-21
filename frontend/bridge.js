@@ -21,7 +21,9 @@
     logStatus: () => invoke('log_status'),
     diskScanStart: (path) => invoke('disk_scan_start', { path }),
     diskScanStatus: () => invoke('disk_scan_status'),
+    diskScanTree: () => invoke('disk_scan_tree'),
     diskScanCancel: () => invoke('disk_scan_cancel'),
+    openInFiles: (path) => invoke('open_in_files', { path }),
     win: {
       min: () => win('minimize'),
       maxToggle: async () => {

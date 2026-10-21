@@ -82,13 +82,15 @@
     constructor(canvas, tipEl, opts = {}) {
       this.cv = canvas;
       this.ctx = canvas.getContext('2d');
+      this.off = document.createElement('canvas'); // cached tile bitmap
+      this.octx = this.off.getContext('2d');
+      this.offKey = '';
       this.tip = tipEl;
       this.onOpen = opts.onOpen || (() => {});
       this.onContext = opts.onContext || null;
       this.rects = [];
       this.hover = -1;
       this.entries = [];
-      this._raf = 0;
       canvas.addEventListener('mousemove', (ev) => this._move(ev));
       canvas.addEventListener('mouseleave', () => this._leave());
       canvas.addEventListener('click', (ev) => this._click(ev));
@@ -97,12 +99,12 @@
       ro.observe(canvas.parentElement);
     }
 
-    // entries: [{name, kind, size, ...}] sorted descending; dirBytes/ownBytes
-    // describe the parent directory (for the "... more" bucket).
-    setData(entries, opts = {}) {
+    // entries: [{name, kind, size, ...}] sorted descending
+    setData(entries) {
       this.entries = entries;
       this.hover = -1;
       this.tip.hidden = true;
+      this.offKey = ''; // force tile re-layout
       this.draw();
     }
 
@@ -111,24 +113,19 @@
       this.rects = [];
       this.hover = -1;
       this.tip.hidden = true;
+      this.offKey = '';
       const c = this.cv, ctx = this.ctx;
       ctx.clearRect(0, 0, c.width, c.height);
     }
 
-    _css() {
-      return getComputedStyle(document.documentElement);
-    }
-
-    draw() {
-      const c = this.cv;
-      const box = c.parentElement;
-      const w = Math.max(50, box.clientWidth), h = Math.max(50, box.clientHeight);
-      const dpr = window.devicePixelRatio || 1;
-      if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
-        c.width = Math.round(w * dpr);
-        c.height = Math.round(h * dpr);
-      }
-      const ctx = this.ctx;
+    // Layout + paint all tiles to the offscreen canvas once per data/size
+    // change. Hover redraws then cost one blit + one stroke instead of a
+    // full squarify + measureText pass, which pegged the GPU on big grids.
+    _renderTiles(w, h, dpr) {
+      const c = this.off;
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+      const ctx = this.octx;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
       this.rects = [];
@@ -173,11 +170,34 @@
           ctx.fillStyle = 'rgba(255,255,255,.06)';
           ctx.fillRect(x, y, rw, rh);
         }
-        if (idx === this.hover) {
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(x + 1, y + 1, rw - 2, rh - 2);
-        }
+      }
+    }
+
+    draw() {
+      const c = this.cv;
+      const box = c.parentElement;
+      const w = Math.max(50, box.clientWidth), h = Math.max(50, box.clientHeight);
+      const dpr = window.devicePixelRatio || 1;
+      if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+        c.width = Math.round(w * dpr);
+        c.height = Math.round(h * dpr);
+      }
+      const ctx = this.ctx;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      if (!this.entries.length) { this.offKey = ''; return; }
+      const total = this.entries.reduce((s, e) => s + e.size, 0);
+      const key = `${w}x${h}x${dpr}|${this.entries.length}|${total}`;
+      if (key !== this.offKey) {
+        this._renderTiles(w, h, dpr);
+        this.offKey = key;
+      }
+      ctx.drawImage(this.off, 0, 0, w, h);
+      if (this.hover >= 0 && this.hover < this.rects.length) {
+        const r = this.rects[this.hover];
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(r.px + 1, r.py + 1, r.pw - 2, r.ph - 2);
       }
     }
 

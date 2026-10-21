@@ -429,20 +429,29 @@ pub fn run_diskgrid(app: &tauri::AppHandle) {
     std::thread::sleep(Duration::from_millis(5_400));
     shoot(&win, win_id.as_deref().unwrap_or(""), "shots/dgrid_root.png");
 
-    // stage 2: right-click equivalent — browse from a file tile to its
-    // containing folder (movie.mkv lives in Videos/)
+    // stage 2: the real right-click path — dispatch a contextmenu event over
+    // the first tile, check the menu, then run "Browse to containing folder"
+    // on movie.mkv (which lives in Videos/)
     let _ = win.eval(
         r#"(async () => {
           const log = (t) => window.__TAURI_INTERNALS__.invoke('debug_log', { text: t });
           const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-          const ok = window.__diskgrid._testDrill('movie.mkv');
-          await sleep(400);
+          const cv = document.getElementById('diskgrid-canvas');
+          const b = cv.getBoundingClientRect();
+          cv.dispatchEvent(new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, clientX: b.left + 40, clientY: b.top + 40 }));
+          await sleep(300);
+          const menu = document.getElementById('diskgrid-ctx');
+          log('DGRID ctx open=' + menu.classList.contains('open') +
+              ' items=[' + [...menu.children].map(x => x.textContent).join(' | ') + ']');
+          const ok = await window.__diskgrid._testDrill('movie.mkv');
+          await sleep(600);
           log('DGRID drill ok=' + ok +
               ' crumb=' + document.getElementById('diskgrid-crumb').textContent +
               ' backDisabled=' + document.getElementById('diskgrid-back').disabled);
         })()"#,
     );
-    std::thread::sleep(Duration::from_millis(1_000));
+    std::thread::sleep(Duration::from_millis(1_400));
     shoot(&win, win_id.as_deref().unwrap_or(""), "shots/dgrid_drill.png");
 
     // stage 3: Back returns to the flat top-files view

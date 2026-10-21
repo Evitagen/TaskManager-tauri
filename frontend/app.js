@@ -634,7 +634,8 @@ const diskgrid = (() => {
   const ctxEl = document.getElementById('diskgrid-ctx');
   let grid = null;      // TreemapGrid instance (lazy — after first open)
   let stack = [];       // [flatNode, ...folder nodes] — path from the root view
-  let rootNode = null;  // full scanned tree (for resolving file paths)
+  let rootNode = null;  // full scanned tree (lazy — only fetched on first drill)
+  let treeLoading = null;
   let flatNode = null;  // pseudo-node: largest files across the whole mount
   let rootPath = '';
   let scanning = false;
@@ -648,29 +649,17 @@ const diskgrid = (() => {
 
   const cur = () => stack[stack.length - 1];
 
-  // Walk the whole scanned tree and collect every file with its path relative
-  // to the mount, then keep the TOP_FILES largest. Files dropped by the
-  // backend's per-directory cap are invisible here, but those are by
-  // definition smaller than the 250 kept in their directory; `totalFiles`
-  // (the scan-wide counter) keeps the "… N more" label honest.
-  function buildFlat(root, totalFiles) {
-    const files = [];
-    const walk = [{ node: root, prefix: '' }];
-    while (walk.length) {
-      const { node, prefix } = walk.pop();
-      for (const c of node.children || []) {
-        if (c.kind === 'file') files.push({ name: c.name, size: c.size, path: prefix + c.name });
-        else if (c.children && c.children.length) walk.push({ node: c, prefix: prefix + c.name + '/' });
-      }
-    }
-    files.sort((a, b) => b.size - a.size);
-    const shown = files.slice(0, TOP_FILES);
+  // The flat view is built from the backend's global top-files list (exact,
+  // includes files the per-directory cap dropped). `bytes`/`files` are the
+  // scan-wide totals, so the "… N more files" tile keeps areas honest.
+  function buildFlat(topFiles, totalFiles, totalBytes) {
+    const shown = topFiles.slice(0, TOP_FILES);
     const shownBytes = shown.reduce((s, f) => s + f.size, 0);
     return {
-      name: 'Top files', flat: true, size: root.size,
+      name: 'Top files', flat: true, size: totalBytes,
       files: shown,
-      restCount: Math.max(0, (totalFiles || files.length) - shown.length),
-      restSize: Math.max(0, root.size - shownBytes),
+      restCount: Math.max(0, totalFiles - shown.length),
+      restSize: Math.max(0, totalBytes - shownBytes),
     };
   }
 
@@ -729,23 +718,28 @@ const diskgrid = (() => {
   }
 
   function openNode(node) {
+    if (node._path === undefined) {
+      const p = cur() && cur()._path ? cur()._path : rootPath;
+      node._path = p + '/' + node.name;
+    }
     stack.push(node);
     render();
   }
 
-  // Right-click menu on a tile. Files offer the jump to their containing
-  // folder (the whole point of the flat view); directories offer Open.
+  // Right-click menu on a tile. Files offer "Open file location" (system file
+  // manager) and the in-app jump to the containing folder; directories offer
+  // Open + Open in Files.
   function closeCtx() { ctxEl.classList.remove('open'); }
   function showCtx(e, ev) {
     const items = [];
     if (e.kind === 'file' && e.path) {
       const dir = e.path.includes('/') ? e.path.slice(0, e.path.lastIndexOf('/')) : '';
-      items.push({
-        label: dir ? `Browse to ${rootPath}/${dir}` : `Browse to ${rootPath}`,
-        fn: () => browseToFolder(e.path),
-      });
+      const dirAbs = dir ? `${rootPath}/${dir}` : rootPath;
+      items.push({ label: 'Open file location', fn: () => api.openInFiles(dirAbs) });
+      items.push({ label: 'Browse to containing folder', fn: () => browseToFolder(e.path) });
     } else if (e.kind === 'dir') {
       items.push({ label: `Open ${e.name}`, fn: () => openNode(e) });
+      if (e._path) items.push({ label: 'Open in Files', fn: () => api.openInFiles(e._path) });
     }
     if (!items.length) return;
     ctxEl.innerHTML = '';
@@ -765,16 +759,35 @@ const diskgrid = (() => {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCtx(); });
   window.addEventListener('blur', closeCtx);
 
+  // The full tree is only needed for folder drill-down, so it is fetched
+  // lazily on the first drill (it can be tens of MB on a big mount).
+  function ensureTree() {
+    if (rootNode) return Promise.resolve(true);
+    if (!treeLoading) {
+      treeLoading = (async () => {
+        const r = await api.diskScanTree();
+        if (!r || !r.ok || !r.tree) { treeLoading = null; return false; }
+        rootNode = r.tree;
+        rootNode._path = rootPath;
+        return true;
+      })();
+    }
+    return treeLoading;
+  }
+
   // Resolve a file's relative path against the scanned tree and switch the
   // grid to the classic folder drill-down at its parent directory.
-  function browseToFolder(relPath) {
-    if (!rootNode) return false;
+  async function browseToFolder(relPath) {
+    if (!(await ensureTree())) return false;
     const segs = relPath.split('/').slice(0, -1);
     let node = rootNode;
     const chain = [];
+    let path = rootPath;
     for (const s of segs) {
       const c = (node.children || []).find((x) => x.kind === 'dir' && x.name === s);
       if (!c) return false;
+      path += '/' + s;
+      c._path = path;
       chain.push(c);
       node = c;
     }
@@ -815,9 +828,11 @@ const diskgrid = (() => {
         progEl.hidden = true;
         if (s.cancelled) { showEmpty('<div><b>Scan cancelled</b></div>'); return; }
         if (s.error) { showEmpty(`<div><b>Scan failed</b></div><div>${esc(s.error)}</div>`); return; }
-        if (!s.tree || !s.tree.children) { showEmpty('<div><b>Nothing to show</b></div>'); return; }
-        rootNode = s.tree;
-        flatNode = buildFlat(rootNode, s.files);
+        const top = s.topFiles || [];
+        if (!top.length) { showEmpty('<div><b>Nothing to show</b></div>'); return; }
+        rootNode = null;
+        treeLoading = null;
+        flatNode = buildFlat(top, s.files, s.bytes);
         stack = [flatNode];
         render();
         return;
@@ -839,6 +854,7 @@ const diskgrid = (() => {
     const g = gen;
     stack = [];
     rootNode = null;
+    treeLoading = null;
     flatNode = null;
     closeCtx();
     scanning = false;
@@ -887,19 +903,19 @@ const diskgrid = (() => {
       restSize: cur().restSize,
     } : null),
     // drill down without a synthetic click: from the flat view, find a file by
-    // name and browse to its containing folder; from a folder view, open the
-    // named subdirectory.
+    // name and browse to its containing folder (async — may fetch the tree);
+    // from a folder view, open the named subdirectory.
     _testDrill: (name) => {
       const n = stack[stack.length - 1];
-      if (!n) return false;
+      if (!n) return Promise.resolve(false);
       if (n.flat) {
         const f = n.files.find((x) => x.name === name);
-        return f ? browseToFolder(f.path) : false;
+        return f ? browseToFolder(f.path) : Promise.resolve(false);
       }
       const c = n.children.find((x) => x.name === name && x.kind === 'dir');
-      if (!c) return false;
+      if (!c) return Promise.resolve(false);
       openNode(c);
-      return true;
+      return Promise.resolve(true);
     },
   };
 })();

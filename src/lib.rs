@@ -112,10 +112,17 @@ fn disk_scan_start(state: tauri::State<'_, Arc<ScanShared>>, path: String) -> Va
     collectors::diskscan::start(&state, &path)
 }
 
-/// Poll the running (or finished) disk scan; includes the tree once done.
+/// Poll the running (or finished) disk scan; includes the top-files list
+/// once done (the tree itself is fetched lazily via `disk_scan_tree`).
 #[tauri::command]
 fn disk_scan_status(state: tauri::State<'_, Arc<ScanShared>>) -> Value {
     collectors::diskscan::status(&state)
+}
+
+/// The finished scan's directory tree (serialized once, cached server-side).
+#[tauri::command]
+fn disk_scan_tree(state: tauri::State<'_, Arc<ScanShared>>) -> Value {
+    collectors::diskscan::tree(&state)
 }
 
 /// Cancel the running disk scan.
@@ -123,6 +130,27 @@ fn disk_scan_status(state: tauri::State<'_, Arc<ScanShared>>) -> Value {
 fn disk_scan_cancel(state: tauri::State<'_, Arc<ScanShared>>) -> Value {
     collectors::diskscan::cancel(&state);
     json!({ "ok": true })
+}
+
+/// Open a directory in the desktop's file manager ("open file location").
+#[tauri::command]
+fn open_in_files(path: String) -> Value {
+    match std::fs::metadata(&path) {
+        Ok(md) if md.is_dir() => {}
+        Ok(_) => return json!({ "ok": false, "error": format!("{path} is not a directory") }),
+        Err(e) => return json!({ "ok": false, "error": format!("cannot access {path}: {e}") }),
+    }
+    use std::process::Stdio;
+    match std::process::Command::new("xdg-open")
+        .arg(&path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(_) => json!({ "ok": true }),
+        Err(e) => json!({ "ok": false, "error": format!("xdg-open: {e}") }),
+    }
 }
 
 pub fn run() {
@@ -149,7 +177,9 @@ pub fn run() {
             log_status,
             disk_scan_start,
             disk_scan_status,
+            disk_scan_tree,
             disk_scan_cancel,
+            open_in_files,
         ]);
     if std::env::var("TM_VERIFY_LAYOUT").ok().map(|v| !v.is_empty()).unwrap_or(false) {
         builder = builder.setup(|app| {
