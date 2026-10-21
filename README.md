@@ -233,11 +233,11 @@ Field names are camelCase (`serde rename_all`) and match every consumer in
 
 ## Platform notes
 
-- **`WEBKIT_DISABLE_COMPOSITING_MODE=1` is set in `run()`** (before the webview
-  is created). On this host (picom with the xrender backend), WebKitGTK's
-  accelerated GL compositing path does not reach the window pixmap / compositor,
-  which would leave the window a flat background. Plain compositing mode renders
-  correctly and is what the screenshots above were captured with.
+- **GPU compositing runs normally** (no `WEBKIT_DISABLE_COMPOSITING_MODE`).
+  On some setups (picom with the xrender backend) WebKitGTK's accelerated GL
+  compositing path does not reach the window pixmap, leaving the window a
+  flat background — if that ever recurs, launch with
+  `WEBKIT_DISABLE_COMPOSITING_MODE=1` to fall back to plain compositing.
 - **`fitPage()` rAF fallback.** WebKitGTK pauses `requestAnimationFrame` while
   the webview is not being composited, so the fit-scaler also runs on a short
   timeout. Behaviour is unchanged in Chromium (rAF path wins, timeout is a no-op).

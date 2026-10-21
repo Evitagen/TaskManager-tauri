@@ -155,10 +155,11 @@ fn open_in_files(path: String) -> Value {
 
 pub fn run() {
     // WebKitGTK's accelerated (GL) compositing path does not reach the X
-    // window pixmap / compositor on this host (picom xrender backend), which
-    // leaves the window a flat background. Force the plain compositing mode
-    // before the webview is created; the env is read by WebKit in-process.
-    std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    // window pixmap on some backends (e.g. picom with the xrender backend),
+    // which leaves the window a flat background. That mode is no longer
+    // forced — GPU compositing runs normally. If a future compositor hits
+    // the same bug, re-export WEBKIT_DISABLE_COMPOSITING_MODE=1 before
+    // launch (or restore the set_var here).
 
     let log_state: Arc<Mutex<ProcLogger>> = Arc::new(Mutex::new(ProcLogger::new()));
     let scan_state: Arc<ScanShared> = Arc::new(ScanShared::new());
