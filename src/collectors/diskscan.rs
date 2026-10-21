@@ -5,8 +5,8 @@
 //   · never follow symlinks (symlinks count as their own tiny entry)
 //   · directories on a different filesystem than the scan root are skipped
 //     (their subtree is not descended into)
-//   · per-directory the largest CHILD_CAP entries are kept; the tail is
-//     folded into an "… N more" bucket on the frontend
+//   · per-directory the largest CHILD_CAP entries (dirs and files mixed) are
+//     kept; the tail is folded into an "… N more" bucket on the frontend
 //
 // One coordinator thread walks the scan root and hands every top-level
 // directory to a small worker pool (WORKERS threads) that scans whole
@@ -37,11 +37,9 @@ pub struct SNode {
     pub name: String,
     /// "dir" | "file"
     pub kind: String,
-    /// Total bytes (file: its size; dir: own + children subtrees).
+    /// Total bytes (file: its size; dir: hidden + children subtrees).
     pub size: u64,
-    /// Bytes of files directly inside a directory.
-    pub own: u64,
-    /// Largest children, sorted descending by size.
+    /// Largest children (dirs and files mixed), sorted descending by size.
     pub children: Vec<SNode>,
     /// Entries dropped by the per-directory cap.
     pub omitted: u64,
@@ -50,7 +48,11 @@ pub struct SNode {
 }
 
 fn node_dir(name: &str) -> SNode {
-    SNode { name: name.into(), kind: "dir".into(), size: 0, own: 0, children: Vec::new(), omitted: 0, hidden: 0 }
+    SNode { name: name.into(), kind: "dir".into(), size: 0, children: Vec::new(), omitted: 0, hidden: 0 }
+}
+
+fn node_file(name: &str, size: u64) -> SNode {
+    SNode { name: name.into(), kind: "file".into(), size, children: Vec::new(), omitted: 0, hidden: 0 }
 }
 
 /// Keep the CHILD_CAP largest children of a directory; sizes of dropped
@@ -78,7 +80,7 @@ fn add_child(parent: &mut SNode, count: &mut u64, node: SNode) {
 fn finalize(node: &mut SNode, count: u64) {
     node.children.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
     node.omitted = count.saturating_sub(node.children.len() as u64);
-    node.size = node.own + node.hidden + node.children.iter().map(|c| c.size).sum::<u64>();
+    node.size = node.hidden + node.children.iter().map(|c| c.size).sum::<u64>();
 }
 
 /// Shared scan state: atomics for the hot counters (every file touched),
@@ -206,7 +208,6 @@ fn scan_subtree(root: &PathBuf, name: &str, root_dev: u64, sh: &ScanShared, out:
                                 sh.errors.fetch_add(1, Ordering::Relaxed);
                             }
                             Ok(it) => {
-                                stack[top].count += 1;
                                 let name = entry.file_name().to_string_lossy().into_owned();
                                 stack.push(Frame {
                                     path: child_path,
@@ -221,8 +222,9 @@ fn scan_subtree(root: &PathBuf, name: &str, root_dev: u64, sh: &ScanShared, out:
                     Ok(_) => {
                         // file or symlink: lstat size only, never follow
                         let sz = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                        stack[top].node.own += sz;
-                        stack[top].count += 1;
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        let fr = &mut stack[top];
+                        add_child(&mut fr.node, &mut fr.count, node_file(&name, sz));
                         sh.files.fetch_add(1, Ordering::Relaxed);
                         sh.bytes.fetch_add(sz, Ordering::Relaxed);
                     }
@@ -296,8 +298,8 @@ fn coordinator(sh: Arc<ScanShared>, root: PathBuf, root_dev: u64) {
                         }
                         Ok(_) => {
                             let sz = e.metadata().map(|m| m.len()).unwrap_or(0);
-                            root_node.own += sz;
-                            root_count += 1;
+                            let name = e.file_name().to_string_lossy().into_owned();
+                            add_child(&mut root_node, &mut root_count, node_file(&name, sz));
                             sh.files.fetch_add(1, Ordering::Relaxed);
                             sh.bytes.fetch_add(sz, Ordering::Relaxed);
                         }

@@ -85,19 +85,20 @@ type (SSD/HDD from `queue/rotational`) and model. Card order follows the
 `/proc/diskstats` line order, so the grid is stable between ticks — a
 regression test pins exactly that.
 
-Clicking a card with a mount opens a **treemap drill-down** of that mount
-point: a squarified grid (Bruls/Huizing/van Wijk) where each folder or file
-gets an area proportional to its size — the `Documents` block is visibly
-bigger than `Music` because it holds more bytes. Folders are blue, files
-amber; the largest 250 entries per directory are drawn and the remainder
-collapses into an `… N more` block (so parent totals stay exact — the
-dropped bytes are tracked in a per-node `hidden` field). Click a rectangle
-to descend into that folder, use the breadcrumb to jump back up, or Back to
-step out one level; Close cancels any in-flight scan and returns to the
-cards. Scanning runs on a 6-worker pool with a `du -x` filesystem barrier
-(never crosses into other mounts), counts symlink sizes without following
-them, and streams live progress (files · bytes · elapsed · unreadable)
-while the renderer polls every 300 ms.
+Clicking a card with a mount opens a **treemap of the mount's largest files**:
+a squarified grid (Bruls/Huizing/van Wijk) where every rectangle is one
+individual file and its area is proportional to its size — the biggest space
+hogs on the disk are the biggest tiles, no clicking through folders to find
+them. Files are amber; the largest 250 files are drawn and everything else
+collapses into one grey `… N more files` block (so areas stay honest — the
+dropped bytes are tracked in a per-node `hidden` field). **Right-click** a
+file to jump to its containing folder, which switches to the classic
+per-directory drill-down (folders blue, click to descend, breadcrumb to
+climb, `←` Back returns to the flat file view, `✕` cancels any in-flight
+scan and returns to the cards). Scanning runs on a 6-worker pool with a
+`du -x` filesystem barrier (never crosses into other mounts), counts symlink
+sizes without following them, and streams live progress (files · bytes ·
+elapsed · unreadable) while the renderer polls every 300 ms.
 
 ### Network
 
@@ -207,8 +208,9 @@ Env-gated modes are wired into `lib.rs` (none affect normal use):
   Builds a ~1 GB synthetic directory tree under `/tmp/tm-diskgrid-demo`
   (sparse files — the scanner reports `st_size`, so no real bytes are
   written), scans it through the real `disk_scan_*` commands, screenshots
-  the root treemap, drills into `Documents` via the breadcrumb, goes Back,
-  closes, then clicks a real disk card to prove the live scan path. Exits.
+  the flat top-files treemap, jumps from `movie.mkv` to its containing
+  folder (the right-click action), goes Back, closes, then clicks a real
+  disk card to prove the live scan path. Exits.
 
 Screenshots are written to `shots/tauri_<tab>.png`. Because Tauri v2 exposes no
 window-capture API on Linux, the harness captures the **root window** with
@@ -223,7 +225,7 @@ unambiguously even when other windows share the plain title.
 `proc_sample` → `{ ts, procs[{pid,name,state,uid,user,cpu,mem,diskBs,netBs,cmdline,isApp,isSelf}], selfUid }`
 `meta_get`    → `{ app, version, platform, arch, hostname }`
 `proc_kill`   → `{ ok, error? }`
-`disk_scan_status` tree node → `{ name, kind:"dir"|"file", size, own, children[], omitted, hidden }`
+`disk_scan_status` tree node → `{ name, kind:"dir"|"file", size, children[], omitted, hidden }`
 
 Field names are camelCase (`serde rename_all`) and match every consumer in
 `frontend/app.js`. Rates (B/s, %, MHz, GHz) are computed as deltas over the

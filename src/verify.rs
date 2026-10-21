@@ -418,21 +418,24 @@ pub fn run_diskgrid(app: &tauri::AppHandle) {
                                    usage: { mount: '/tmp/tm-diskgrid-demo', usedPct: 61 } });
           await sleep(4000);
           const empty = document.getElementById('diskgrid-empty');
+          const f = window.__diskgrid._testFlat();
           log('DGRID open gridOn=' + document.getElementById('sec-disk').className +
               ' emptyHidden=' + empty.hidden +
               ' crumb=' + document.getElementById('diskgrid-crumb').textContent +
-              ' progress=' + document.getElementById('diskgrid-progress').textContent);
+              ' flat=' + (f ? f.files + ' files, top=' + f.top +
+                          ', rest=' + f.restCount + '/' + f.restSize : 'none'));
         })()"#,
     );
     std::thread::sleep(Duration::from_millis(5_400));
     shoot(&win, win_id.as_deref().unwrap_or(""), "shots/dgrid_root.png");
 
-    // stage 2: drill down into Documents
+    // stage 2: right-click equivalent — browse from a file tile to its
+    // containing folder (movie.mkv lives in Videos/)
     let _ = win.eval(
         r#"(async () => {
           const log = (t) => window.__TAURI_INTERNALS__.invoke('debug_log', { text: t });
           const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-          const ok = window.__diskgrid._testDrill('Documents');
+          const ok = window.__diskgrid._testDrill('movie.mkv');
           await sleep(400);
           log('DGRID drill ok=' + ok +
               ' crumb=' + document.getElementById('diskgrid-crumb').textContent +
@@ -442,7 +445,7 @@ pub fn run_diskgrid(app: &tauri::AppHandle) {
     std::thread::sleep(Duration::from_millis(1_000));
     shoot(&win, win_id.as_deref().unwrap_or(""), "shots/dgrid_drill.png");
 
-    // stage 3: Back returns to the root view
+    // stage 3: Back returns to the flat top-files view
     let _ = win.eval(
         r#"(async () => {
           const log = (t) => window.__TAURI_INTERNALS__.invoke('debug_log', { text: t });

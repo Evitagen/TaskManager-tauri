@@ -84,6 +84,7 @@
       this.ctx = canvas.getContext('2d');
       this.tip = tipEl;
       this.onOpen = opts.onOpen || (() => {});
+      this.onContext = opts.onContext || null;
       this.rects = [];
       this.hover = -1;
       this.entries = [];
@@ -91,6 +92,7 @@
       canvas.addEventListener('mousemove', (ev) => this._move(ev));
       canvas.addEventListener('mouseleave', () => this._leave());
       canvas.addEventListener('click', (ev) => this._click(ev));
+      canvas.addEventListener('contextmenu', (ev) => this._context(ev));
       const ro = new ResizeObserver(() => this.draw());
       ro.observe(canvas.parentElement);
     }
@@ -193,6 +195,7 @@
       const e = this.rects[i].e;
       const tip = this.tip;
       tip.innerHTML = `<b>${esc(e.name)}</b>` + (e.fmtSize ? `<br>${esc(e.fmtSize)}` : '') +
+        (e.path ? `<br><span class="muted">${esc(e.path)}</span>` : '') +
         (e.kind === 'dir' ? '<br><span class="muted">Click to open</span>' : '');
       tip.hidden = false;
       const b = this.cv.getBoundingClientRect();
@@ -216,6 +219,15 @@
       if (i < 0) return;
       const e = this.rects[i].e;
       if (e.kind === 'dir') this.onOpen(e);
+    }
+
+    _context(ev) {
+      if (!this.onContext) return;
+      const i = this._pick(ev);
+      if (i < 0) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.onContext(this.rects[i].e, ev);
     }
   }
 

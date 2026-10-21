@@ -613,11 +613,14 @@ function renderDiskSection(p) {
   });
 }
 
-/* ── disk space grid — click a disk card → treemap of its biggest items ── */
+/* ── disk space grid — click a disk card → treemap of its biggest files ── */
 // The scan runs once per mount in the background (du-style, `disk_scan_*`
-// commands); drill-down afterwards is purely client-side from the in-memory
-// tree: click a directory tile to descend, Back/breadcrumb to climb.
+// commands). The landing view is a FLAT grid of the largest individual files
+// across the whole mount (area ∝ size), so the space hogs are visible without
+// clicking through folders; right-click a file to jump to its containing
+// folder, which opens the classic per-directory drill-down.
 const diskgrid = (() => {
+  const TOP_FILES = 250; // tiles in the flat view (rest collapses to one tile)
   const secEl = document.getElementById('sec-disk');
   const bar = document.getElementById('diskgrid-bar');
   const backBtn = document.getElementById('diskgrid-back');
@@ -628,26 +631,63 @@ const diskgrid = (() => {
   const cv = document.getElementById('diskgrid-canvas');
   const tip = document.getElementById('diskgrid-tip');
   const emptyEl = document.getElementById('diskgrid-empty');
+  const ctxEl = document.getElementById('diskgrid-ctx');
   let grid = null;      // TreemapGrid instance (lazy — after first open)
-  let stack = [];       // path of nodes from the tree root down
+  let stack = [];       // [flatNode, ...folder nodes] — path from the root view
+  let rootNode = null;  // full scanned tree (for resolving file paths)
+  let flatNode = null;  // pseudo-node: largest files across the whole mount
   let rootPath = '';
   let scanning = false;
   let gen = 0;          // generation counter — stale polls stop themselves
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function ensureGrid() {
-    if (!grid) grid = new TreemapGrid(cv, tip, { onOpen: openNode });
+    if (!grid) grid = new TreemapGrid(cv, tip, { onOpen: openNode, onContext: showCtx });
     return grid;
   }
 
   const cur = () => stack[stack.length - 1];
 
+  // Walk the whole scanned tree and collect every file with its path relative
+  // to the mount, then keep the TOP_FILES largest. Files dropped by the
+  // backend's per-directory cap are invisible here, but those are by
+  // definition smaller than the 250 kept in their directory; `totalFiles`
+  // (the scan-wide counter) keeps the "… N more" label honest.
+  function buildFlat(root, totalFiles) {
+    const files = [];
+    const walk = [{ node: root, prefix: '' }];
+    while (walk.length) {
+      const { node, prefix } = walk.pop();
+      for (const c of node.children || []) {
+        if (c.kind === 'file') files.push({ name: c.name, size: c.size, path: prefix + c.name });
+        else if (c.children && c.children.length) walk.push({ node: c, prefix: prefix + c.name + '/' });
+      }
+    }
+    files.sort((a, b) => b.size - a.size);
+    const shown = files.slice(0, TOP_FILES);
+    const shownBytes = shown.reduce((s, f) => s + f.size, 0);
+    return {
+      name: 'Top files', flat: true, size: root.size,
+      files: shown,
+      restCount: Math.max(0, (totalFiles || files.length) - shown.length),
+      restSize: Math.max(0, root.size - shownBytes),
+    };
+  }
+
   // The largest kept children plus a display-only "… N more" bucket holding
   // the bytes of entries dropped by the per-directory cap.
   function entriesFor(node) {
-    const list = node.children.map((c) => ({ ...c, fmtSize: fBytes(c.size) }));
-    if (node.omitted > 0 && node.hidden > 0) {
-      list.push({ name: `… ${node.omitted} more`, kind: 'other', size: node.hidden, fmtSize: fBytes(node.hidden) });
+    let list;
+    if (node.flat) {
+      list = node.files.map((f) => ({ name: f.name, kind: 'file', size: f.size, fmtSize: fBytes(f.size), path: f.path }));
+      if (node.restCount > 0 && node.restSize > 0) {
+        list.push({ name: `… ${node.restCount.toLocaleString()} more files`, kind: 'other', size: node.restSize, fmtSize: fBytes(node.restSize) });
+      }
+    } else {
+      list = node.children.map((c) => ({ ...c, fmtSize: fBytes(c.size) }));
+      if (node.omitted > 0 && node.hidden > 0) {
+        list.push({ name: `… ${node.omitted} more`, kind: 'other', size: node.hidden, fmtSize: fBytes(node.hidden) });
+      }
     }
     list.sort((a, b) => b.size - a.size);
     return list;
@@ -664,27 +704,83 @@ const diskgrid = (() => {
 
   function renderCrumb() {
     crumbEl.innerHTML = '';
-    stack.forEach((n, i) => {
-      if (i) {
-        const sep = document.createElement('span');
-        sep.className = 'crumb-sep';
-        sep.textContent = '›';
-        crumbEl.appendChild(sep);
-      }
+    const add = (text, title, onClick, isCur) => {
       const b = document.createElement('button');
-      b.className = 'crumb-link' + (i === stack.length - 1 ? ' cur' : '');
-      b.textContent = i === 0 ? (rootPath || n.name) : n.name;
-      b.title = i === 0 ? rootPath : n.name;
-      if (i < stack.length - 1) {
-        b.addEventListener('click', () => { stack = stack.slice(0, i + 1); render(); });
-      }
+      b.className = 'crumb-link' + (isCur ? ' cur' : '');
+      b.textContent = text;
+      b.title = title || text;
+      if (onClick) b.addEventListener('click', onClick);
       crumbEl.appendChild(b);
+    };
+    const sep = () => {
+      const s = document.createElement('span');
+      s.className = 'crumb-sep';
+      s.textContent = '›';
+      crumbEl.appendChild(s);
+    };
+    // stack[0] is the flat "Top files" view, labelled with the mount path.
+    stack.forEach((n, i) => {
+      if (i) sep();
+      const isCur = i === stack.length - 1;
+      const label = n.flat ? (rootPath || '/') : n.name;
+      add(label, n.flat ? `Largest files on ${rootPath}` : label,
+        !isCur ? () => { stack = stack.slice(0, i + 1); render(); } : null, isCur);
     });
   }
 
   function openNode(node) {
     stack.push(node);
     render();
+  }
+
+  // Right-click menu on a tile. Files offer the jump to their containing
+  // folder (the whole point of the flat view); directories offer Open.
+  function closeCtx() { ctxEl.classList.remove('open'); }
+  function showCtx(e, ev) {
+    const items = [];
+    if (e.kind === 'file' && e.path) {
+      const dir = e.path.includes('/') ? e.path.slice(0, e.path.lastIndexOf('/')) : '';
+      items.push({
+        label: dir ? `Browse to ${rootPath}/${dir}` : `Browse to ${rootPath}`,
+        fn: () => browseToFolder(e.path),
+      });
+    } else if (e.kind === 'dir') {
+      items.push({ label: `Open ${e.name}`, fn: () => openNode(e) });
+    }
+    if (!items.length) return;
+    ctxEl.innerHTML = '';
+    for (const it of items) {
+      const d = document.createElement('div');
+      d.className = 'ctx-item';
+      d.textContent = it.label;
+      d.addEventListener('click', () => { closeCtx(); it.fn(); });
+      ctxEl.appendChild(d);
+    }
+    ctxEl.classList.add('open');
+    const r = ctxEl.getBoundingClientRect();
+    ctxEl.style.left = Math.max(6, Math.min(ev.clientX, innerWidth - r.width - 6)) + 'px';
+    ctxEl.style.top = Math.max(6, Math.min(ev.clientY, innerHeight - r.height - 6)) + 'px';
+  }
+  document.addEventListener('click', (e) => { if (!ctxEl.contains(e.target)) closeCtx(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCtx(); });
+  window.addEventListener('blur', closeCtx);
+
+  // Resolve a file's relative path against the scanned tree and switch the
+  // grid to the classic folder drill-down at its parent directory.
+  function browseToFolder(relPath) {
+    if (!rootNode) return false;
+    const segs = relPath.split('/').slice(0, -1);
+    let node = rootNode;
+    const chain = [];
+    for (const s of segs) {
+      const c = (node.children || []).find((x) => x.kind === 'dir' && x.name === s);
+      if (!c) return false;
+      chain.push(c);
+      node = c;
+    }
+    stack = [flatNode, ...chain];
+    render();
+    return true;
   }
 
   function showEmpty(html) {
@@ -720,7 +816,9 @@ const diskgrid = (() => {
         if (s.cancelled) { showEmpty('<div><b>Scan cancelled</b></div>'); return; }
         if (s.error) { showEmpty(`<div><b>Scan failed</b></div><div>${esc(s.error)}</div>`); return; }
         if (!s.tree || !s.tree.children) { showEmpty('<div><b>Nothing to show</b></div>'); return; }
-        stack = [s.tree];
+        rootNode = s.tree;
+        flatNode = buildFlat(rootNode, s.files);
+        stack = [flatNode];
         render();
         return;
       }
@@ -740,6 +838,9 @@ const diskgrid = (() => {
     gen++;
     const g = gen;
     stack = [];
+    rootNode = null;
+    flatNode = null;
+    closeCtx();
     scanning = false;
     rootPath = disk.usage && disk.usage.mount ? disk.usage.mount : '';
     secEl.classList.add('grid-on');
@@ -760,6 +861,7 @@ const diskgrid = (() => {
 
   function close() {
     gen++;
+    closeCtx();
     if (scanning) api.diskScanCancel().catch(() => {});
     scanning = false;
     secEl.classList.remove('grid-on');
@@ -777,10 +879,23 @@ const diskgrid = (() => {
 
   return {
     open, close, isOpen: () => !host.hidden,
-    // verification helper: drill down by directory name without a synthetic click
+    // verification helpers
+    _testFlat: () => (cur() && cur().flat ? {
+      files: cur().files.length,
+      top: cur().files[0] ? cur().files[0].name : null,
+      restCount: cur().restCount,
+      restSize: cur().restSize,
+    } : null),
+    // drill down without a synthetic click: from the flat view, find a file by
+    // name and browse to its containing folder; from a folder view, open the
+    // named subdirectory.
     _testDrill: (name) => {
       const n = stack[stack.length - 1];
       if (!n) return false;
+      if (n.flat) {
+        const f = n.files.find((x) => x.name === name);
+        return f ? browseToFolder(f.path) : false;
+      }
       const c = n.children.find((x) => x.name === name && x.kind === 'dir');
       if (!c) return false;
       openNode(c);
